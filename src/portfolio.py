@@ -1,6 +1,8 @@
 # trading_bot/src/portfolio.py
 import asyncio
+import glob
 import json
+import os
 import time
 from datetime import datetime, timedelta
 
@@ -152,12 +154,13 @@ def sell_most_profitable_asset(
             portfolio_lock,
             finished_trades,
             "Sold to free up slot for new buy",
+            price_monitor_manager=None,  # No price monitor for this action
         )
 
 
 def save_portfolio():
     """
-    Saves the current portfolio state to a JSON file.
+    Saves the current portfolio state to a JSON file and maintains only the 3 latest backup files.
     """
     try:
         with portfolio_lock:
@@ -171,9 +174,32 @@ def save_portfolio():
                     for symbol, asset in portfolio["assets"].items()
                 },
             }
+        # Save to primary file
         with open(PORTFOLIO_FILE, "w") as f:
             json.dump(portfolio_copy, f, indent=4)
-        logger.info(f"Saved portfolio to {PORTFOLIO_FILE}")
+
+        # Save to backup file
+        backup_file = (
+            f"{PORTFOLIO_FILE}.backup_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}"
+        )
+        with open(backup_file, "w") as f:
+            json.dump(portfolio_copy, f, indent=4)
+        logger.info(f"Saved portfolio to {PORTFOLIO_FILE} and backup {backup_file}")
+
+        # Manage backup files: keep only the 3 latest
+        backup_files = glob.glob(f"{PORTFOLIO_FILE}.backup_*")
+        # Sort by timestamp in filename (descending)
+        backup_files.sort(key=lambda x: x.split("backup_")[-1], reverse=True)
+        # Keep the 3 most recent, delete the rest
+        for old_file in backup_files[3:]:
+            try:
+                os.remove(old_file)
+                logger.debug(f"Deleted old backup file: {old_file}")
+            except Exception as e:
+                logger.error(
+                    f"Error deleting old backup file {old_file}: {e}", exc_info=True
+                )
+
     except Exception as e:
         logger.error(f"Error saving portfolio to {PORTFOLIO_FILE}: {e}", exc_info=True)
 
@@ -495,6 +521,7 @@ def manage_portfolio(above_threshold_data, percent_changes, price_monitor_manage
                             portfolio_lock,
                             finished_trades,
                             reason,
+                            price_monitor_manager
                         )
                     )
 

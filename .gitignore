@@ -10,3 +10,5 @@ buy_trades.csv
 creds.json
 *.parquet
 .pytest_cache/
+*.json.backup*
+state.json
