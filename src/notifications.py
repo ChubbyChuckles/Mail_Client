@@ -1,4 +1,4 @@
-# trading_bot/src/notifications.py
+# notifications.py
 import asyncio
 
 import telegram
@@ -27,7 +27,7 @@ asyncio.set_event_loop(loop)
 
 async def send_telegram_message(message: str):
     """
-    Sends a message to the configured Telegram chat.
+    Sends a message to the configured Telegram chat with a timeout.
 
     Args:
         message (str): The message to send.
@@ -36,19 +36,22 @@ async def send_telegram_message(message: str):
         logger.debug("Telegram bot not initialized. Skipping message.")
         return
     try:
-        await bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=message)
+        # Use asyncio.wait_for to enforce a 5-second timeout
+        await asyncio.wait_for(
+            bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=message), timeout=5
+        )
         logger.debug(f"Sent Telegram message: {message}")
+    except asyncio.TimeoutError:
+        logger.error("Telegram message send timed out after 5 seconds.")
     except TelegramError as e:
         logger.error(f"Failed to send Telegram message: {e}")
+    except Exception as e:
+        logger.error(f"Unexpected error sending Telegram message: {e}", exc_info=True)
 
 
 async def send_trade_notification(trade: dict, reason: str):
     """
-    Sends a formatted trade notification to the configured Telegram chat.
-
-    Args:
-        trade (dict): Dictionary containing trade details.
-        reason (str): Reason for the trade action.
+    Sends a formatted trade notification to the configured Telegram chat with a timeout.
     """
     if bot is None:
         logger.debug("Telegram bot not initialized. Skipping trade notification.")
@@ -67,22 +70,27 @@ async def send_trade_notification(trade: dict, reason: str):
             f"Buy Fee: €{trade['Buy Fee']}\n"
             f"Sell Fee: €{trade['Sell Fee']}"
         )
-        await send_telegram_message(message)
+        # Use asyncio.wait_for for trade notification
+        await asyncio.wait_for(send_telegram_message(message), timeout=5)
+    except asyncio.TimeoutError:
+        logger.error("Trade notification send timed out after 5 seconds.")
     except Exception as e:
-        logger.error(f"Failed to send trade notification: {e}")
+        logger.error(f"Failed to send trade notification: {e}", exc_info=True)
 
 
 def run_async(coro):
     """
     Runs an async coroutine in the existing event loop.
-
-    Args:
-        coro: The coroutine to run.
     """
+    global loop
     try:
+        if loop.is_closed():
+            logger.warning("Event loop closed. Creating new event loop.")
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
         return loop.run_until_complete(coro)
     except Exception as e:
-        logger.error(f"Error running async coroutine: {e}")
+        logger.error(f"Error running async coroutine: {e}", exc_info=True)
         return None
 
 
