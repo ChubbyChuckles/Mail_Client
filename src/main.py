@@ -132,6 +132,9 @@ def main():
             logger.info(
                 f"Cycle completed in {elapsed_time:.2f} seconds. Sleeping for {sleep_time:.2f} seconds."
             )
+            logger.info(
+                f"The Cycle time is {LOOP_INTERVAL_SECONDS} seconds."
+            )
             logger.debug(f"Active threads: {threading.active_count()}")
             time.sleep(sleep_time)
 
