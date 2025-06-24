@@ -1,18 +1,17 @@
-import time
+import json
 import logging
+import re
+import time
 from datetime import datetime
 from threading import Lock, Semaphore
+
+import ccxt
 import pandas as pd
 from tenacity import retry, stop_after_attempt, wait_fixed
-import ccxt
-import json
-import re
 
 from .config import (API_KEY, API_SECRET, CANDLE_LIMIT, CANDLE_TIMEFRAME,
-                     CONCURRENT_REQUESTS, RATE_LIMIT_WEIGHT,
-                     logger)
+                     CONCURRENT_REQUESTS, RATE_LIMIT_WEIGHT, logger)
 from .state import last_reset_time, rate_limit_lock, weight_used
-
 
 # Initialize rate limit tracking
 semaphore = Semaphore(CONCURRENT_REQUESTS)
@@ -27,6 +26,7 @@ bitvavo = ccxt.bitvavo(
     }
 )
 
+
 def handle_ban_error(exception):
     """
     Checks if an exception indicates an IP/API key ban and returns the ban expiration time.
@@ -40,19 +40,22 @@ def handle_ban_error(exception):
     try:
         # Check if the exception message contains a JSON response with error code 105
         error_message = str(exception)
-        if '403' in error_message and 'errorCode":105' in error_message:
+        if "403" in error_message and 'errorCode":105' in error_message:
             # Extract timestamp using regex
-            match = re.search(r'The ban expires at (\d+)', error_message)
+            match = re.search(r"The ban expires at (\d+)", error_message)
             if match:
                 ban_expiry_ms = int(match.group(1))
                 ban_expiry = ban_expiry_ms / 1000  # Convert to seconds
-                expiry_datetime = datetime.utcfromtimestamp(ban_expiry).strftime('%Y-%m-%d %H:%M:%S UTC')
+                expiry_datetime = datetime.utcfromtimestamp(ban_expiry).strftime(
+                    "%Y-%m-%d %H:%M:%S UTC"
+                )
                 logger.warning(f"API ban detected. Ban expires at {expiry_datetime}")
                 return ban_expiry
         return None
     except Exception as e:
         logger.error(f"Error parsing ban response: {e}")
         return None
+
 
 def wait_until_ban_lifted(ban_expiry):
     """
@@ -64,10 +67,13 @@ def wait_until_ban_lifted(ban_expiry):
     current_time = time.time()
     wait_time = max(0, ban_expiry - current_time)
     if wait_time > 0:
-        logger.info(f"Waiting {wait_time:.2f} seconds until ban lifts at {datetime.utcfromtimestamp(ban_expiry)}")
+        logger.info(
+            f"Waiting {wait_time:.2f} seconds until ban lifts at {datetime.utcfromtimestamp(ban_expiry)}"
+        )
         time.sleep(wait_time)
     else:
         logger.info("Ban has already expired")
+
 
 def check_rate_limit(request_weight):
     """
@@ -86,11 +92,14 @@ def check_rate_limit(request_weight):
         if (weight_used + request_weight) > RATE_LIMIT_WEIGHT * 0.7:  # Lowered to 70%
             sleep_time = 60 - (current_time - last_reset_time)
             if sleep_time > 0:
-                logger.info(f"Approaching rate limit, sleeping for {sleep_time:.2f} seconds")
+                logger.info(
+                    f"Approaching rate limit, sleeping for {sleep_time:.2f} seconds"
+                )
                 time.sleep(sleep_time)
                 weight_used = 0
                 last_reset_time = current_time
         weight_used += request_weight
+
 
 @retry(stop=stop_after_attempt(3), wait=wait_fixed(5))
 def fetch_ticker_price(symbol):
@@ -112,7 +121,9 @@ def fetch_ticker_price(symbol):
                 return None
             price = float(ticker["last"])
             if price <= 0:
-                logger.error(f"Invalid price {price} for {symbol}. Price must be positive.")
+                logger.error(
+                    f"Invalid price {price} for {symbol}. Price must be positive."
+                )
                 return None
             logger.debug(f"Fetched ticker price {price:.8f} for {symbol}")
             return price
@@ -123,6 +134,7 @@ def fetch_ticker_price(symbol):
                 raise  # Retry after ban lifts
             logger.error(f"Error fetching ticker price for {symbol}: {e}")
             return None
+
 
 @retry(stop=stop_after_attempt(3), wait=wait_fixed(5))
 def fetch_klines(symbol, timeframe=CANDLE_TIMEFRAME, limit=CANDLE_LIMIT):
@@ -149,9 +161,13 @@ def fetch_klines(symbol, timeframe=CANDLE_TIMEFRAME, limit=CANDLE_LIMIT):
             df["symbol"] = symbol
             # Validate prices
             if (df[["open", "high", "low", "close"]] <= 0).any().any():
-                logger.error(f"Invalid prices (zero or negative) in OHLCV data for {symbol}. Discarding data.")
+                logger.error(
+                    f"Invalid prices (zero or negative) in OHLCV data for {symbol}. Discarding data."
+                )
                 return pd.DataFrame()
-            logger.debug(f"Fetched {len(df)} candles for {symbol} in {time.time() - start_time:.2f} seconds")
+            logger.debug(
+                f"Fetched {len(df)} candles for {symbol} in {time.time() - start_time:.2f} seconds"
+            )
             return df
         except ccxt.NetworkError as e:
             ban_expiry = handle_ban_error(e)
@@ -160,6 +176,7 @@ def fetch_klines(symbol, timeframe=CANDLE_TIMEFRAME, limit=CANDLE_LIMIT):
                 raise  # Retry after ban lifts
             logger.error(f"Error fetching data for {symbol}: {e}")
             return pd.DataFrame()
+
 
 @retry(stop=stop_after_attempt(3), wait=wait_fixed(5))
 def fetch_trade_details(symbol, start_time, end_time):
@@ -177,10 +194,16 @@ def fetch_trade_details(symbol, start_time, end_time):
     with semaphore:
         check_rate_limit(1)  # Weight for fetch_trades is typically 1
         try:
-            if not isinstance(start_time, datetime) or not isinstance(end_time, datetime):
-                raise ValueError(f"Invalid timestamp types: start_time={type(start_time)}, end_time={type(end_time)}")
+            if not isinstance(start_time, datetime) or not isinstance(
+                end_time, datetime
+            ):
+                raise ValueError(
+                    f"Invalid timestamp types: start_time={type(start_time)}, end_time={type(end_time)}"
+                )
             if end_time <= start_time:
-                raise ValueError(f"end_time ({end_time}) must be after start_time ({start_time})")
+                raise ValueError(
+                    f"end_time ({end_time}) must be after start_time ({start_time})"
+                )
             start_ms = int(start_time.timestamp() * 1000)
             end_ms = int(end_time.timestamp() * 1000)
             trades = bitvavo.fetch_trades(
@@ -190,7 +213,9 @@ def fetch_trade_details(symbol, start_time, end_time):
                 params={"start": start_ms, "end": end_ms},
             )
             if not trades:
-                logger.warning(f"No trades returned for {symbol} from {start_time} to {end_time}")
+                logger.warning(
+                    f"No trades returned for {symbol} from {start_time} to {end_time}"
+                )
                 return 0, 0.0
             valid_trades = [
                 trade for trade in trades if start_ms <= trade["timestamp"] <= end_ms
@@ -200,9 +225,13 @@ def fetch_trade_details(symbol, start_time, end_time):
                 (trade["amount"] * trade["price"] for trade in trades), default=0.0
             )
             if trade_count == 0:
-                logger.debug(f"No valid trades for {symbol} in time range {start_time} to {end_time}")
+                logger.debug(
+                    f"No valid trades for {symbol} in time range {start_time} to {end_time}"
+                )
             else:
-                logger.debug(f"Fetched {trade_count} trades for {symbol}, Largest trade volume: €{largest_trade_volume_eur:.2f}")
+                logger.debug(
+                    f"Fetched {trade_count} trades for {symbol}, Largest trade volume: €{largest_trade_volume_eur:.2f}"
+                )
             return trade_count, largest_trade_volume_eur
         except ccxt.NetworkError as e:
             ban_expiry = handle_ban_error(e)
@@ -210,7 +239,9 @@ def fetch_trade_details(symbol, start_time, end_time):
                 wait_until_ban_lifted(ban_expiry)
                 raise  # Retry after ban lifts
         except ccxt.InvalidOrder as e:
-            logger.error(f"Invalid order error fetching trade details for {symbol}: {e}")
+            logger.error(
+                f"Invalid order error fetching trade details for {symbol}: {e}"
+            )
             return 0, 0.0
         except ccxt.RateLimitExceeded as e:
             logger.error(f"Rate limit exceeded for {symbol}: {e}")

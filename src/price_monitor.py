@@ -370,19 +370,27 @@ class PriceMonitorManager:
                 self.running[symbol] = False
                 if symbol in self.threads:
                     thread = self.threads[symbol]
-                    if thread != threading.current_thread():  # Avoid joining current thread
+                    if (
+                        thread != threading.current_thread()
+                    ):  # Avoid joining current thread
                         thread.join(timeout=1)
                         if thread.is_alive():
-                            logger.warning(f"Thread for {symbol} did not terminate within 1 second.")
+                            logger.warning(
+                                f"Thread for {symbol} did not terminate within 1 second."
+                            )
                         else:
-                            logger.debug(f"Thread for {symbol} terminated successfully.")
+                            logger.debug(
+                                f"Thread for {symbol} terminated successfully."
+                            )
                     del self.threads[symbol]
                 del self.running[symbol]
                 self.last_update.pop(symbol, None)
                 self.last_prices.pop(symbol, None)
                 logger.info(f"Stopped price monitoring thread for {symbol}")
             except Exception as e:
-                logger.error(f"Error stopping price monitor for {symbol}: {e}", exc_info=True)
+                logger.error(
+                    f"Error stopping price monitor for {symbol}: {e}", exc_info=True
+                )
 
     def stop_all(self):
         """Stops all active price monitoring threads."""
