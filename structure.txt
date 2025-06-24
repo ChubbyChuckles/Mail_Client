@@ -1,0 +1,34 @@
+trading_bot/
+├── src/
+│   ├── __init__.py
+│   ├── config.py               # Configuration loading and environment variables
+│   ├── exchange.py             # Bitvavo API interactions (fetch_klines, fetch_ticker_price, etc.)
+│   ├── portfolio.py            # Portfolio management (manage_portfolio, sell_asset, etc.)
+│   ├── data_processor.py       # Data verification and analysis (verify_and_analyze_data)
+│   ├── price_monitor.py        # Price monitoring logic (PriceMonitorManager)
+│   ├── notifications.py        # Telegram notifications (send_telegram_message, send_trade_notification)
+│   ├── storage.py              # Local storage and Google Sheets interactions (save_to_local, write_to_google_sheets)
+│   ├── utils.py                # Utility functions (calculate_ema, check_rate_limit, etc.)
+│   └── main.py                 # Main script to orchestrate the trading bot
+├── tests/
+│   ├── __init__.py
+│   ├── test_config.py          # Tests for configuration loading
+│   ├── test_exchange.py        # Tests for exchange API interactions
+│   ├── test_portfolio.py       # Tests for portfolio management
+│   ├── test_data_processor.py  # Tests for data processing
+│   ├── test_price_monitor.py   # Tests for price monitoring
+│   ├── test_notifications.py   # Tests for notifications
+│   ├── test_storage.py         # Tests for storage functions
+│   └── test_utils.py           # Tests for utility functions
+├── .env.example                # Sample environment file
+├── README.md                   # Project documentation
+├── requirements.txt            # Python dependencies
+├── setup.py                    # Package installation script
+├── .gitignore                  # Git ignore file
+├── LICENSE                     # License file (e.g., MIT)
+├── pytest.ini                  # Pytest configuration
+├── .github/
+│   └── workflows/
+│       └── ci.yml              # GitHub Actions CI pipeline
+└── docs/
+    └── api.md                  # API documentation (optional)
