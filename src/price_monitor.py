@@ -14,8 +14,8 @@ from .config import (ACTIVE_ASSETS_SHEET, ADJUSTED_PROFIT_TARGET,
                      PROFIT_TARGET_MULTIPLIER, RATE_LIMIT_WEIGHT,
                      SHEETS_WRITE_INTERVAL, SPREADSHEET_NAME,
                      TIME_STOP_MINUTES, TRAILING_STOP_FACTOR,
-                     TRAILING_STOP_FACTOR_EARLY, WEIGHT_PER_REQUEST, logger)
-from .exchange import bitvavo, fetch_ticker_price
+                     TRAILING_STOP_FACTOR_EARLY, logger)
+from .exchange import bitvavo
 from .portfolio import sell_asset
 from .state import (last_sheets_write, low_volatility_assets,
                     negative_momentum_counts, weight_used)
@@ -49,7 +49,7 @@ class PriceMonitorManager:
         try:
             with threading.Lock():
                 global weight_used
-                weight_used += WEIGHT_PER_REQUEST
+                weight_used += 1
             logger.info(
                 f"Started price monitoring for {symbol}. Weight used: {weight_used}"
             )
@@ -341,7 +341,8 @@ class PriceMonitorManager:
         """
         if symbol not in self.threads and symbol not in low_volatility_assets:
             with threading.Lock():
-                if weight_used + WEIGHT_PER_REQUEST > RATE_LIMIT_WEIGHT * 0.9:
+                global weight_used
+                if weight_used + 2 > RATE_LIMIT_WEIGHT * 0.7:  # Use weight 2 for ticker
                     logger.warning(
                         f"Approaching rate limit ({weight_used}). Delaying monitoring for {symbol}."
                     )
@@ -369,22 +370,19 @@ class PriceMonitorManager:
                 self.running[symbol] = False
                 if symbol in self.threads:
                     thread = self.threads[symbol]
-                    thread.join(timeout=1)
-                    if thread.is_alive():
-                        logger.warning(
-                            f"Thread for {symbol} did not terminate within 0.1 seconds."
-                        )
-                    else:
-                        logger.debug(f"Thread for {symbol} terminated successfully.")
+                    if thread != threading.current_thread():  # Avoid joining current thread
+                        thread.join(timeout=1)
+                        if thread.is_alive():
+                            logger.warning(f"Thread for {symbol} did not terminate within 1 second.")
+                        else:
+                            logger.debug(f"Thread for {symbol} terminated successfully.")
                     del self.threads[symbol]
                 del self.running[symbol]
                 self.last_update.pop(symbol, None)
                 self.last_prices.pop(symbol, None)
                 logger.info(f"Stopped price monitoring thread for {symbol}")
             except Exception as e:
-                logger.error(
-                    f"Error stopping price monitor for {symbol}: {e}", exc_info=True
-                )
+                logger.error(f"Error stopping price monitor for {symbol}: {e}", exc_info=True)
 
     def stop_all(self):
         """Stops all active price monitoring threads."""

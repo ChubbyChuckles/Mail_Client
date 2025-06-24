@@ -10,7 +10,7 @@ import pandas as pd
 from .config import (CONCURRENT_REQUESTS, LOOP_INTERVAL_SECONDS,
                      PARQUET_FILENAME, RESULTS_FOLDER, logger)
 from .data_processor import verify_and_analyze_data
-from .exchange import bitvavo, fetch_klines
+from .exchange import bitvavo, fetch_klines,  check_rate_limit
 from .notifications import run_async, send_telegram_message
 from .portfolio import manage_portfolio, save_portfolio
 from .price_monitor import PriceMonitorManager
@@ -42,6 +42,7 @@ def main():
 
             # Filter top 300 symbols by volume
             try:
+                check_rate_limit(1)  # Assume weight of 20 for fetch_tickers; adjust based on documentation
                 tickers = bitvavo.fetch_tickers(eur_pairs)
                 top_volume = sorted(
                     [

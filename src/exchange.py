@@ -8,7 +8,7 @@ from tenacity import retry, stop_after_attempt, wait_fixed
 
 from .config import (API_KEY, API_SECRET, CANDLE_LIMIT, CANDLE_TIMEFRAME,
                      CONCURRENT_REQUESTS, RATE_LIMIT_WEIGHT,
-                     WEIGHT_PER_REQUEST, logger)
+                     logger)
 from .state import last_reset_time, rate_limit_lock, weight_used
 
 # Initialize rate limit tracking
@@ -25,10 +25,13 @@ bitvavo = ccxt.bitvavo(
 )
 
 
-def check_rate_limit():
+def check_rate_limit(request_weight):
     """
     Manages Bitvavo API rate limits by tracking request weight and sleeping if necessary.
     Updates global weight_used and last_reset_time.
+
+    Args:
+        request_weight (int): Weight of the specific API request.
     """
     global weight_used, last_reset_time
     with rate_limit_lock:
@@ -36,16 +39,14 @@ def check_rate_limit():
         if current_time - last_reset_time >= 60:
             weight_used = 0
             last_reset_time = current_time
-        if weight_used + WEIGHT_PER_REQUEST > RATE_LIMIT_WEIGHT * 0.9:
+        if (weight_used + request_weight) > RATE_LIMIT_WEIGHT * 0.7:  # Lowered to 70%
             sleep_time = 60 - (current_time - last_reset_time)
             if sleep_time > 0:
-                logger.info(
-                    f"Approaching rate limit, sleeping for {sleep_time:.2f} seconds"
-                )
+                logger.info(f"Approaching rate limit, sleeping for {sleep_time:.2f} seconds")
                 time.sleep(sleep_time)
                 weight_used = 0
                 last_reset_time = current_time
-        weight_used += WEIGHT_PER_REQUEST
+        weight_used += request_weight
 
 
 @retry(stop=stop_after_attempt(3), wait=wait_fixed(5))
@@ -60,7 +61,7 @@ def fetch_ticker_price(symbol):
         float: Latest price, or None if fetch fails or price is invalid.
     """
     with semaphore:
-        check_rate_limit()
+        check_rate_limit(1)
         try:
             ticker = bitvavo.fetch_ticker(symbol)
             if not isinstance(ticker, dict) or "last" not in ticker:
@@ -93,7 +94,7 @@ def fetch_klines(symbol, timeframe=CANDLE_TIMEFRAME, limit=CANDLE_LIMIT):
         pandas.DataFrame: OHLCV data with columns ['timestamp', 'open', 'high', 'low', 'close', 'volume', 'symbol'].
     """
     with semaphore:
-        check_rate_limit()
+        check_rate_limit(1)  # Adjust weight based on documentation
         try:
             start_time = time.time()
             klines = bitvavo.fetch_ohlcv(symbol, timeframe, limit=limit)
@@ -131,7 +132,7 @@ def fetch_trade_details(symbol, start_time, end_time):
         tuple: (trade_count, largest_trade_volume_eur)
     """
     with semaphore:
-        check_rate_limit()
+        check_rate_limit(1)  # Adjust weight based on documentation
         try:
             if not isinstance(start_time, datetime) or not isinstance(
                 end_time, datetime
