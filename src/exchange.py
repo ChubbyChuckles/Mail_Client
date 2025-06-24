@@ -1,3 +1,6 @@
+import json
+import logging
+import re
 import time
 from datetime import datetime
 from threading import Lock, Semaphore
@@ -7,8 +10,7 @@ import pandas as pd
 from tenacity import retry, stop_after_attempt, wait_fixed
 
 from .config import (API_KEY, API_SECRET, CANDLE_LIMIT, CANDLE_TIMEFRAME,
-                     CONCURRENT_REQUESTS, RATE_LIMIT_WEIGHT,
-                     WEIGHT_PER_REQUEST, logger)
+                     CONCURRENT_REQUESTS, RATE_LIMIT_WEIGHT, logger)
 from .state import last_reset_time, rate_limit_lock, weight_used
 
 # Initialize rate limit tracking
@@ -25,10 +27,61 @@ bitvavo = ccxt.bitvavo(
 )
 
 
-def check_rate_limit():
+def handle_ban_error(exception):
+    """
+    Checks if an exception indicates an IP/API key ban and returns the ban expiration time.
+
+    Args:
+        exception: The exception caught during an API call.
+
+    Returns:
+        float or None: Unix timestamp (seconds) when the ban expires, or None if not a ban error.
+    """
+    try:
+        # Check if the exception message contains a JSON response with error code 105
+        error_message = str(exception)
+        if "403" in error_message and 'errorCode":105' in error_message:
+            # Extract timestamp using regex
+            match = re.search(r"The ban expires at (\d+)", error_message)
+            if match:
+                ban_expiry_ms = int(match.group(1))
+                ban_expiry = ban_expiry_ms / 1000  # Convert to seconds
+                expiry_datetime = datetime.utcfromtimestamp(ban_expiry).strftime(
+                    "%Y-%m-%d %H:%M:%S UTC"
+                )
+                logger.warning(f"API ban detected. Ban expires at {expiry_datetime}")
+                return ban_expiry
+        return None
+    except Exception as e:
+        logger.error(f"Error parsing ban response: {e}")
+        return None
+
+
+def wait_until_ban_lifted(ban_expiry):
+    """
+    Waits until the ban expiration time is reached.
+
+    Args:
+        ban_expiry (float): Unix timestamp (seconds) when the ban expires.
+    """
+    current_time = time.time()
+    wait_time = max(0, ban_expiry - current_time)
+    if wait_time > 0:
+        logger.info(
+            f"Waiting {wait_time:.2f} seconds until ban lifts at {datetime.utcfromtimestamp(ban_expiry)}"
+        )
+        time.sleep(wait_time)
+    else:
+        logger.info("Ban has already expired")
+
+
+def check_rate_limit(request_weight):
     """
     Manages Bitvavo API rate limits by tracking request weight and sleeping if necessary.
     Updates global weight_used and last_reset_time.
+
+    Args:
+        request_weight (int): Weight of the specific API request.
     """
     global weight_used, last_reset_time
     with rate_limit_lock:
@@ -36,7 +89,7 @@ def check_rate_limit():
         if current_time - last_reset_time >= 60:
             weight_used = 0
             last_reset_time = current_time
-        if weight_used + WEIGHT_PER_REQUEST > RATE_LIMIT_WEIGHT * 0.9:
+        if (weight_used + request_weight) > RATE_LIMIT_WEIGHT * 0.7:  # Lowered to 70%
             sleep_time = 60 - (current_time - last_reset_time)
             if sleep_time > 0:
                 logger.info(
@@ -45,7 +98,7 @@ def check_rate_limit():
                 time.sleep(sleep_time)
                 weight_used = 0
                 last_reset_time = current_time
-        weight_used += WEIGHT_PER_REQUEST
+        weight_used += request_weight
 
 
 @retry(stop=stop_after_attempt(3), wait=wait_fixed(5))
@@ -60,7 +113,7 @@ def fetch_ticker_price(symbol):
         float: Latest price, or None if fetch fails or price is invalid.
     """
     with semaphore:
-        check_rate_limit()
+        check_rate_limit(1)  # Weight for fetch_ticker is typically 1
         try:
             ticker = bitvavo.fetch_ticker(symbol)
             if not isinstance(ticker, dict) or "last" not in ticker:
@@ -74,7 +127,11 @@ def fetch_ticker_price(symbol):
                 return None
             logger.debug(f"Fetched ticker price {price:.8f} for {symbol}")
             return price
-        except Exception as e:
+        except ccxt.NetworkError as e:
+            ban_expiry = handle_ban_error(e)
+            if ban_expiry:
+                wait_until_ban_lifted(ban_expiry)
+                raise  # Retry after ban lifts
             logger.error(f"Error fetching ticker price for {symbol}: {e}")
             return None
 
@@ -93,7 +150,7 @@ def fetch_klines(symbol, timeframe=CANDLE_TIMEFRAME, limit=CANDLE_LIMIT):
         pandas.DataFrame: OHLCV data with columns ['timestamp', 'open', 'high', 'low', 'close', 'volume', 'symbol'].
     """
     with semaphore:
-        check_rate_limit()
+        check_rate_limit(1)  # Weight for fetch_ohlcv is typically 1
         try:
             start_time = time.time()
             klines = bitvavo.fetch_ohlcv(symbol, timeframe, limit=limit)
@@ -112,7 +169,11 @@ def fetch_klines(symbol, timeframe=CANDLE_TIMEFRAME, limit=CANDLE_LIMIT):
                 f"Fetched {len(df)} candles for {symbol} in {time.time() - start_time:.2f} seconds"
             )
             return df
-        except Exception as e:
+        except ccxt.NetworkError as e:
+            ban_expiry = handle_ban_error(e)
+            if ban_expiry:
+                wait_until_ban_lifted(ban_expiry)
+                raise  # Retry after ban lifts
             logger.error(f"Error fetching data for {symbol}: {e}")
             return pd.DataFrame()
 
@@ -131,7 +192,7 @@ def fetch_trade_details(symbol, start_time, end_time):
         tuple: (trade_count, largest_trade_volume_eur)
     """
     with semaphore:
-        check_rate_limit()
+        check_rate_limit(1)  # Weight for fetch_trades is typically 1
         try:
             if not isinstance(start_time, datetime) or not isinstance(
                 end_time, datetime
@@ -172,6 +233,11 @@ def fetch_trade_details(symbol, start_time, end_time):
                     f"Fetched {trade_count} trades for {symbol}, Largest trade volume: €{largest_trade_volume_eur:.2f}"
                 )
             return trade_count, largest_trade_volume_eur
+        except ccxt.NetworkError as e:
+            ban_expiry = handle_ban_error(e)
+            if ban_expiry:
+                wait_until_ban_lifted(ban_expiry)
+                raise  # Retry after ban lifts
         except ccxt.InvalidOrder as e:
             logger.error(
                 f"Invalid order error fetching trade details for {symbol}: {e}"
