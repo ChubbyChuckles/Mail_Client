@@ -85,8 +85,10 @@ def sell_asset(
             price_monitor_manager.stop(symbol)
 
             async def send_with_timeout():
-                async with asyncio.timeout(2):
-                    await send_trade_notification(finished_trade, reason)
+                try:
+                    await asyncio.wait_for(send_trade_notification(finished_trade, reason), timeout=2)
+                except asyncio.TimeoutError:
+                    logger.error(f"Trade notification for {symbol} timed out after 2 seconds.")
 
             run_async(send_with_timeout())
         except Exception as e:
@@ -521,7 +523,7 @@ def manage_portfolio(above_threshold_data, percent_changes, price_monitor_manage
                             portfolio_lock,
                             finished_trades,
                             reason,
-                            price_monitor_manager
+                            price_monitor_manager,
                         )
                     )
 

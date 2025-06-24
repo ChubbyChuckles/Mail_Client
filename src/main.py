@@ -24,14 +24,18 @@ last_cycle_time = time.time()
 
 def watchdog(price_monitor_manager):
     global last_cycle_time
-    price_monitor_manager = PriceMonitorManager()  # Ensure access to PriceMonitorManager instance
+    price_monitor_manager = (
+        PriceMonitorManager()
+    )  # Ensure access to PriceMonitorManager instance
     while True:
         try:
             current_time = time.time()
             if current_time - last_cycle_time > LOOP_INTERVAL_SECONDS * 2:
                 logger.error("Main loop appears to be hung. Checking ban status...")
                 if is_banned and current_time < ban_expiry_time:
-                    logger.info(f"API is banned until {datetime.utcfromtimestamp(ban_expiry_time)}. Stopping monitors and waiting...")
+                    logger.info(
+                        f"API is banned until {datetime.utcfromtimestamp(ban_expiry_time)}. Stopping monitors and waiting..."
+                    )
                     price_monitor_manager.stop_all()  # Stop all monitoring threads
                     run_async(
                         send_telegram_message(
@@ -53,7 +57,9 @@ def main():
     logger.info("Starting trading bot...")
     run_async(send_telegram_message("Trading bot started."))
     price_monitor_manager = PriceMonitorManager()
-    watchdog_thread = threading.Thread(target=watchdog, args=(price_monitor_manager,), daemon=True)
+    watchdog_thread = threading.Thread(
+        target=watchdog, args=(price_monitor_manager,), daemon=True
+    )
     watchdog_thread.start()
 
     try:

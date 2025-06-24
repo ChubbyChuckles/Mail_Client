@@ -16,12 +16,12 @@ from .config import (ACTIVE_ASSETS_SHEET, ADJUSTED_PROFIT_TARGET,
                      SHEETS_WRITE_INTERVAL, SPREADSHEET_NAME,
                      TIME_STOP_MINUTES, TRAILING_STOP_FACTOR,
                      TRAILING_STOP_FACTOR_EARLY, logger)
-from .exchange import bitvavo, check_rate_limit, wait_until_ban_lifted, semaphore, handle_ban_error
-
+from .exchange import (bitvavo, check_rate_limit, handle_ban_error, semaphore,
+                       wait_until_ban_lifted)
 from .portfolio import sell_asset
-from .state import (last_sheets_write, low_volatility_assets,
-                    negative_momentum_counts, weight_used, is_banned,
-                    ban_expiry_time)
+from .state import (ban_expiry_time, is_banned, last_sheets_write,
+                    low_volatility_assets, negative_momentum_counts,
+                    weight_used)
 from .storage import write_to_google_sheets
 from .utils import calculate_dynamic_ema_period, calculate_ema
 
@@ -43,7 +43,9 @@ class PriceMonitorManager:
             current_threads = len(self.threads)
             if current_threads > max_threads:
                 # Stop oldest threads to meet new limit
-                threads_to_stop = sorted(self.threads.items(), key=lambda x: self.last_update.get(x[0], 0))[:current_threads - max_threads]
+                threads_to_stop = sorted(
+                    self.threads.items(), key=lambda x: self.last_update.get(x[0], 0)
+                )[: current_threads - max_threads]
                 for symbol, _ in threads_to_stop:
                     self.stop(symbol)
                 logger.info(f"Reduced active monitoring threads to {max_threads}")
@@ -67,7 +69,9 @@ class PriceMonitorManager:
             while symbol in self.running and self.running[symbol]:
                 # Check for API ban
                 if is_banned and time.time() < ban_expiry_time:
-                    logger.warning(f"API banned until {datetime.utcfromtimestamp(ban_expiry_time)}. Pausing {symbol}.")
+                    logger.warning(
+                        f"API banned until {datetime.utcfromtimestamp(ban_expiry_time)}. Pausing {symbol}."
+                    )
                     wait_until_ban_lifted(ban_expiry_time)
                     continue
                 try:
@@ -76,10 +80,16 @@ class PriceMonitorManager:
                     with semaphore:
                         ticker = self.exchange.fetch_ticker(symbol)
                         if not isinstance(ticker, dict) or "last" not in ticker:
-                            logger.error(f"Invalid ticker response for {symbol}: {ticker}")
-                            self.ticker_errors[symbol] = self.ticker_errors.get(symbol, 0) + 1
+                            logger.error(
+                                f"Invalid ticker response for {symbol}: {ticker}"
+                            )
+                            self.ticker_errors[symbol] = (
+                                self.ticker_errors.get(symbol, 0) + 1
+                            )
                             if self.ticker_errors[symbol] >= 3:
-                                logger.warning(f"{symbol} has {self.ticker_errors[symbol]} ticker errors. Marking as low volatility.")
+                                logger.warning(
+                                    f"{symbol} has {self.ticker_errors[symbol]} ticker errors. Marking as low volatility."
+                                )
                                 with portfolio_lock:
                                     low_volatility_assets.add(symbol)
                                 self.stop(symbol)
@@ -100,26 +110,44 @@ class PriceMonitorManager:
                                     portfolio["assets"][symbol]["highest_price"], price
                                 )
                         # Candle logic
-                        if last_candle_time is None or current_second > last_candle_time:
+                        if (
+                            last_candle_time is None
+                            or current_second > last_candle_time
+                        ):
                             if candles:
-                                self.evaluate_candle(candles[-1], symbol, portfolio, portfolio_lock, candles, candles_df)
-                            candles.append({
-                                "timestamp": current_second,
-                                "open": price,
-                                "high": price,
-                                "low": price,
-                                "close": price,
-                                "volume": 0,
-                            })
+                                self.evaluate_candle(
+                                    candles[-1],
+                                    symbol,
+                                    portfolio,
+                                    portfolio_lock,
+                                    candles,
+                                    candles_df,
+                                )
+                            candles.append(
+                                {
+                                    "timestamp": current_second,
+                                    "open": price,
+                                    "high": price,
+                                    "low": price,
+                                    "close": price,
+                                    "volume": 0,
+                                }
+                            )
                             last_candle_time = current_second
                         else:
                             candles[-1]["high"] = max(candles[-1]["high"], price)
                             candles[-1]["low"] = min(candles[-1]["low"], price)
                             candles[-1]["close"] = price
-                        candles = [c for c in candles if (current_time - c["timestamp"]).total_seconds() <= 5]
+                        candles = [
+                            c
+                            for c in candles
+                            if (current_time - c["timestamp"]).total_seconds() <= 5
+                        ]
                         # Inactivity check
                         if time.time() - self.last_update[symbol] > INACTIVITY_TIMEOUT:
-                            logger.info(f"{symbol} inactive for {INACTIVITY_TIMEOUT} seconds. Marking as low volatility.")
+                            logger.info(
+                                f"{symbol} inactive for {INACTIVITY_TIMEOUT} seconds. Marking as low volatility."
+                            )
                             with portfolio_lock:
                                 low_volatility_assets.add(symbol)
                             self.stop(symbol)
@@ -299,7 +327,14 @@ class PriceMonitorManager:
                     )
                 )
                 sell_asset(
-                    symbol, asset, current_price, portfolio, portfolio_lock, [], reason, price_monitor_manager=None
+                    symbol,
+                    asset,
+                    current_price,
+                    portfolio,
+                    portfolio_lock,
+                    [],
+                    reason,
+                    price_monitor_manager=None,
                 )
                 global last_sheets_write
                 if (
@@ -336,10 +371,16 @@ class PriceMonitorManager:
             with threading.Lock():
                 global weight_used, CONCURRENT_REQUESTS
                 if len(self.threads) >= CONCURRENT_REQUESTS:
-                    logger.warning(f"Max threads ({CONCURRENT_REQUESTS}) reached. Cannot start monitoring for {symbol}.")
+                    logger.warning(
+                        f"Max threads ({CONCURRENT_REQUESTS}) reached. Cannot start monitoring for {symbol}."
+                    )
                     return
-                if weight_used + 2 > RATE_LIMIT_WEIGHT * 0.8:  # Increase threshold to 80%
-                    logger.warning(f"Approaching rate limit ({weight_used}). Delaying monitoring for {symbol}.")
+                if (
+                    weight_used + 2 > RATE_LIMIT_WEIGHT * 0.8
+                ):  # Increase threshold to 80%
+                    logger.warning(
+                        f"Approaching rate limit ({weight_used}). Delaying monitoring for {symbol}."
+                    )
                     time.sleep(5)
                     return
             self.running[symbol] = True

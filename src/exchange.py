@@ -94,17 +94,22 @@ def check_rate_limit(request_weight):
             logger.info(f"Resetting rate limit: weight_used={weight_used} -> 0")
             weight_used = 0
             last_reset_time = current_time
-        logger.debug(f"Checking rate limit: weight_used={weight_used}, request_weight={request_weight}, total={weight_used + request_weight}, limit={RATE_LIMIT_WEIGHT}")
+        logger.debug(
+            f"Checking rate limit: weight_used={weight_used}, request_weight={request_weight}, total={weight_used + request_weight}, limit={RATE_LIMIT_WEIGHT}"
+        )
         if (weight_used + request_weight) > RATE_LIMIT_WEIGHT * 0.5:
             sleep_time = 60 - (current_time - last_reset_time)
             if sleep_time > 0:
-                logger.info(f"Approaching rate limit, sleeping for {sleep_time:.2f} seconds")
+                logger.info(
+                    f"Approaching rate limit, sleeping for {sleep_time:.2f} seconds"
+                )
                 time.sleep(sleep_time)
                 weight_used = 0
                 last_reset_time = current_time
                 new_concurrency = max(1, CONCURRENT_REQUESTS - 1)
                 CONCURRENT_REQUESTS = new_concurrency
                 from .price_monitor import PriceMonitorManager
+
                 PriceMonitorManager().adjust_concurrency(new_concurrency)
                 logger.info(f"Adjusted CONCURRENT_REQUESTS to {CONCURRENT_REQUESTS}")
         weight_used += request_weight
