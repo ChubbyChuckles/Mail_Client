@@ -1,24 +1,21 @@
 # trading_bot/src/main.py
-import time
-import pandas as pd
-from datetime import datetime, timedelta
-from concurrent.futures import ThreadPoolExecutor
-from .config import (
-    logger,
-    LOOP_INTERVAL_SECONDS,
-    RESULTS_FOLDER,
-    PARQUET_FILENAME,
-    CONCURRENT_REQUESTS,
-)
-from .exchange import bitvavo, fetch_klines
-from .data_processor import verify_and_analyze_data
-from .portfolio import manage_portfolio, save_portfolio
-from .state import portfolio, portfolio_lock, low_volatility_assets
-from .storage import save_to_local
-from .notifications import run_async, send_telegram_message
-import threading
 import sys
-from .price_monitor import PriceMonitorManager  
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timedelta
+
+import pandas as pd
+
+from .config import (CONCURRENT_REQUESTS, LOOP_INTERVAL_SECONDS,
+                     PARQUET_FILENAME, RESULTS_FOLDER, logger)
+from .data_processor import verify_and_analyze_data
+from .exchange import bitvavo, fetch_klines
+from .notifications import run_async, send_telegram_message
+from .portfolio import manage_portfolio, save_portfolio
+from .price_monitor import PriceMonitorManager
+from .state import low_volatility_assets, portfolio, portfolio_lock
+from .storage import save_to_local
 
 
 def main():
@@ -32,8 +29,9 @@ def main():
         # Initialize markets
         markets = bitvavo.load_markets()
         eur_pairs = [
-            symbol for symbol in markets
-            if symbol.endswith('/EUR') and markets[symbol].get('active', False)
+            symbol
+            for symbol in markets
+            if symbol.endswith("/EUR") and markets[symbol].get("active", False)
         ]
         logger.info(f"Loaded {len(markets)} markets, {len(eur_pairs)} active EUR pairs")
 
@@ -46,9 +44,13 @@ def main():
             try:
                 tickers = bitvavo.fetch_tickers(eur_pairs)
                 top_volume = sorted(
-                    [(symbol, ticker['quoteVolume']) for symbol, ticker in tickers.items() if ticker.get('quoteVolume')],
+                    [
+                        (symbol, ticker["quoteVolume"])
+                        for symbol, ticker in tickers.items()
+                        if ticker.get("quoteVolume")
+                    ],
                     key=lambda x: x[1],
-                    reverse=True
+                    reverse=True,
                 )[:300]
                 symbols = [symbol for symbol, _ in top_volume]
             except Exception as e:
@@ -57,12 +59,18 @@ def main():
             logger.info(f"Processing {len(symbols)} EUR symbols")
 
             active_monitors = price_monitor_manager.active_monitors()
-            adjusted_concurrency = max(1, min(CONCURRENT_REQUESTS - active_monitors, 20))
-            logger.info(f"Active monitors: {active_monitors}, Adjusted concurrency: {adjusted_concurrency}")
+            adjusted_concurrency = max(
+                1, min(CONCURRENT_REQUESTS - active_monitors, 20)
+            )
+            logger.info(
+                f"Active monitors: {active_monitors}, Adjusted concurrency: {adjusted_concurrency}"
+            )
 
             # Fetch OHLCV data
             with ThreadPoolExecutor(max_workers=adjusted_concurrency) as executor:
-                logger.debug(f"Starting ThreadPoolExecutor with {adjusted_concurrency} workers")
+                logger.debug(
+                    f"Starting ThreadPoolExecutor with {adjusted_concurrency} workers"
+                )
                 results = executor.map(fetch_klines, symbols)
                 for symbol, result in zip(symbols, results):
                     logger.debug(f"Received result for {symbol}")
@@ -76,15 +84,19 @@ def main():
                 save_to_local(combined_df, output_path)
 
                 # Analyze data and manage portfolio
-                above_threshold_data, percent_changes = verify_and_analyze_data(combined_df, price_monitor_manager)
-                manage_portfolio(above_threshold_data, percent_changes, price_monitor_manager)
+                above_threshold_data, percent_changes = verify_and_analyze_data(
+                    combined_df, price_monitor_manager
+                )
+                manage_portfolio(
+                    above_threshold_data, percent_changes, price_monitor_manager
+                )
                 save_portfolio()
 
                 # Log portfolio status
                 with portfolio_lock:
-                    total_value = portfolio['cash'] + sum(
-                        asset['quantity'] * asset['current_price']
-                        for asset in portfolio['assets'].values()
+                    total_value = portfolio["cash"] + sum(
+                        asset["quantity"] * asset["current_price"]
+                        for asset in portfolio["assets"].values()
                     )
                     logger.info(
                         f"Portfolio Status: Cash: {portfolio['cash']:.2f} EUR, "
@@ -97,21 +109,28 @@ def main():
             # Clean up inactive monitors
             try:
                 with portfolio_lock:
-                    active_assets = set(portfolio['assets'].keys())
+                    active_assets = set(portfolio["assets"].keys())
                     for symbol in list(price_monitor_manager.running.keys()):
                         if symbol not in active_assets:
                             logger.warning(f"Stopping orphaned monitor for {symbol}")
                             price_monitor_manager.stop(symbol)
                     for symbol in active_assets:
-                        if symbol not in price_monitor_manager.running and symbol not in low_volatility_assets:
-                            price_monitor_manager.start(symbol, portfolio, portfolio_lock, combined_df)
+                        if (
+                            symbol not in price_monitor_manager.running
+                            and symbol not in low_volatility_assets
+                        ):
+                            price_monitor_manager.start(
+                                symbol, portfolio, portfolio_lock, combined_df
+                            )
             except Exception as e:
                 logger.error(f"Error managing price monitors: {e}")
 
             # Sleep until next cycle
             elapsed_time = time.time() - start_time
             sleep_time = max(0, LOOP_INTERVAL_SECONDS - elapsed_time)
-            logger.info(f"Cycle completed in {elapsed_time:.2f} seconds. Sleeping for {sleep_time:.2f} seconds.")
+            logger.info(
+                f"Cycle completed in {elapsed_time:.2f} seconds. Sleeping for {sleep_time:.2f} seconds."
+            )
             logger.debug(f"Active threads: {threading.active_count()}")
             time.sleep(sleep_time)
 
@@ -121,6 +140,7 @@ def main():
         save_portfolio()
         run_async(send_telegram_message("Trading bot stopped."))
         from .notifications import shutdown_loop
+
         shutdown_loop()
         logger.info("Bot stopped successfully.")
         sys.exit(0)
@@ -130,6 +150,7 @@ def main():
         price_monitor_manager.stop_all()
         save_portfolio()
         sys.exit(1)
+
 
 if __name__ == "__main__":
     main()

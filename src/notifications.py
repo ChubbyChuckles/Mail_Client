@@ -1,7 +1,9 @@
 # trading_bot/src/notifications.py
 import asyncio
+
 import telegram
 from telegram.error import TelegramError
+
 from .config import TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, logger
 
 # Initialize Telegram bot
@@ -14,11 +16,14 @@ if TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID:
         logger.error(f"Failed to initialize Telegram bot: {e}")
         bot = None
 else:
-    logger.warning("TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID missing. Telegram notifications disabled.")
+    logger.warning(
+        "TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID missing. Telegram notifications disabled."
+    )
 
 # Initialize a single event loop
 loop = asyncio.new_event_loop()
 asyncio.set_event_loop(loop)
+
 
 async def send_telegram_message(message: str):
     """
@@ -35,6 +40,7 @@ async def send_telegram_message(message: str):
         logger.debug(f"Sent Telegram message: {message}")
     except TelegramError as e:
         logger.error(f"Failed to send Telegram message: {e}")
+
 
 async def send_trade_notification(trade: dict, reason: str):
     """
@@ -65,6 +71,7 @@ async def send_trade_notification(trade: dict, reason: str):
     except Exception as e:
         logger.error(f"Failed to send trade notification: {e}")
 
+
 def run_async(coro):
     """
     Runs an async coroutine in the existing event loop.
@@ -78,14 +85,14 @@ def run_async(coro):
         logger.error(f"Error running async coroutine: {e}")
         return None
 
+
 def shutdown_loop():
     """
     Safely shuts down the event loop.
     """
     try:
         tasks = [
-            t for t in asyncio.all_tasks(loop)
-            if t is not asyncio.current_task(loop)
+            t for t in asyncio.all_tasks(loop) if t is not asyncio.current_task(loop)
         ]
         for task in tasks:
             task.cancel()

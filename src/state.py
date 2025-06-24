@@ -1,12 +1,13 @@
 # trading_bot/src/state.py
-from threading import Lock
 import json
-from datetime import datetime
 import time
+from datetime import datetime
+from threading import Lock
+
 from .config import PORTFOLIO_VALUE
 
 # Initialize global state
-portfolio = {'cash': PORTFOLIO_VALUE, 'assets': {}}
+portfolio = {"cash": PORTFOLIO_VALUE, "assets": {}}
 portfolio_lock = Lock()
 rate_limit_lock = Lock()
 

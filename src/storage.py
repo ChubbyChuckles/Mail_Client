@@ -1,22 +1,19 @@
 # trading_bot/src/storage.py
-import os
 import json
-import pandas as pd
-import pyarrow.parquet as pq
-import pyarrow as pa
-import gspread
-from oauth2client.service_account import ServiceAccountCredentials
+import os
 from datetime import datetime
-from .config import (
-    RESULTS_FOLDER,
-    PORTFOLIO_FILE,
-    GOOGLE_SHEETS_CREDENTIALS,
-    SPREADSHEET_NAME,
-    ACTIVE_ASSETS_SHEET,
-    FINISHED_TRADES_SHEET,
-    logger,
-)
+
+import gspread
+import pandas as pd
+import pyarrow as pa
+import pyarrow.parquet as pq
+from oauth2client.service_account import ServiceAccountCredentials
+
+from .config import (ACTIVE_ASSETS_SHEET, FINISHED_TRADES_SHEET,
+                     GOOGLE_SHEETS_CREDENTIALS, PORTFOLIO_FILE, RESULTS_FOLDER,
+                     SPREADSHEET_NAME, logger)
 from .state import portfolio, portfolio_lock
+
 
 def save_to_local(df, output_path):
     """
@@ -34,7 +31,7 @@ def save_to_local(df, output_path):
         if os.path.exists(output_path):
             existing_df = pq.read_table(output_path).to_pandas()
             combined_df = pd.concat([existing_df, df]).drop_duplicates(
-                subset=['timestamp', 'symbol'], keep='last'
+                subset=["timestamp", "symbol"], keep="last"
             )
         else:
             combined_df = df
@@ -44,6 +41,7 @@ def save_to_local(df, output_path):
     except Exception as e:
         logger.error(f"Error saving to {output_path}: {e}", exc_info=True)
 
+
 def save_portfolio():
     """
     Saves the current portfolio state to a JSON file.
@@ -51,22 +49,30 @@ def save_portfolio():
     try:
         with portfolio_lock:
             portfolio_copy = {
-                'cash': portfolio['cash'],
-                'assets': {
+                "cash": portfolio["cash"],
+                "assets": {
                     symbol: {
                         key: value.isoformat() if isinstance(value, datetime) else value
                         for key, value in asset.items()
                     }
-                    for symbol, asset in portfolio['assets'].items()
-                }
+                    for symbol, asset in portfolio["assets"].items()
+                },
             }
-        with open(PORTFOLIO_FILE, 'w') as f:
+        with open(PORTFOLIO_FILE, "w") as f:
             json.dump(portfolio_copy, f, indent=4)
         logger.info(f"Saved portfolio to {PORTFOLIO_FILE}")
     except Exception as e:
         logger.error(f"Error saving portfolio to {PORTFOLIO_FILE}: {e}", exc_info=True)
 
-def write_to_google_sheets(data, credentials_file, spreadsheet_name, sheet_name, is_active_assets=False, is_finished_trades=False):
+
+def write_to_google_sheets(
+    data,
+    credentials_file,
+    spreadsheet_name,
+    sheet_name,
+    is_active_assets=False,
+    is_finished_trades=False,
+):
     """
     Writes data to a Google Sheet.
 
@@ -80,20 +86,31 @@ def write_to_google_sheets(data, credentials_file, spreadsheet_name, sheet_name,
     """
     try:
         scope = [
-            'https://spreadsheets.google.com/feeds',
-            'https://www.googleapis.com/auth/drive'
+            "https://spreadsheets.google.com/feeds",
+            "https://www.googleapis.com/auth/drive",
         ]
-        creds = ServiceAccountCredentials.from_json_keyfile_name(credentials_file, scope)
+        creds = ServiceAccountCredentials.from_json_keyfile_name(
+            credentials_file, scope
+        )
         client = gspread.authorize(creds)
         spreadsheet = client.open(spreadsheet_name)
         worksheet = spreadsheet.worksheet(sheet_name)
         if is_active_assets:
             if not data:
                 worksheet.clear()
-                worksheet.append_row([
-                    'Symbol', 'Quantity', 'Buy Price', 'Buy Time', 'Current Price',
-                    'Highest Price', 'Profit Target', 'Sell Price', 'Take Action'
-                ])
+                worksheet.append_row(
+                    [
+                        "Symbol",
+                        "Quantity",
+                        "Buy Price",
+                        "Buy Time",
+                        "Current Price",
+                        "Highest Price",
+                        "Profit Target",
+                        "Sell Price",
+                        "Take Action",
+                    ]
+                )
                 logger.info(f"Cleared and initialized {sheet_name} with headers")
                 return
             records = [
@@ -101,20 +118,29 @@ def write_to_google_sheets(data, credentials_file, spreadsheet_name, sheet_name,
                     symbol,
                     f"{asset['quantity']:.8f}",
                     f"{asset['purchase_price']:.2f}",
-                    asset['purchase_time'].strftime('%Y-%m-%d %H:%M:%S'),
+                    asset["purchase_time"].strftime("%Y-%m-%d %H:%M:%S"),
                     f"{asset['current_price']:.2f}",
                     f"{asset['highest_price']:.2f}",
                     f"{asset['profit_target']:.4f}",
                     f"{asset['sell_price']:.2f}",
-                    asset.get('take_action', '')
+                    asset.get("take_action", ""),
                 ]
                 for symbol, asset in data.items()
             ]
             worksheet.clear()
-            worksheet.append_row([
-                'Symbol', 'Quantity', 'Buy Price', 'Buy Time', 'Current Price',
-                'Highest Price', 'Profit Target', 'Sell Price', 'Take Action'
-            ])
+            worksheet.append_row(
+                [
+                    "Symbol",
+                    "Quantity",
+                    "Buy Price",
+                    "Buy Time",
+                    "Current Price",
+                    "Highest Price",
+                    "Profit Target",
+                    "Sell Price",
+                    "Take Action",
+                ]
+            )
             worksheet.append_rows(records)
             logger.info(f"Wrote {len(records)} active assets to {sheet_name}")
         elif is_finished_trades:
@@ -123,25 +149,28 @@ def write_to_google_sheets(data, credentials_file, spreadsheet_name, sheet_name,
                 return
             records = [
                 [
-                    trade['Symbol'],
-                    trade['Buy Quantity'],
-                    trade['Buy Price'],
-                    trade['Buy Time'],
-                    trade['Buy Fee'],
-                    trade['Sell Quantity'],
-                    trade['Sell Price'],
-                    trade['Sell Time'],
-                    trade['Sell Fee'],
-                    trade['Profit/Loss']
+                    trade["Symbol"],
+                    trade["Buy Quantity"],
+                    trade["Buy Price"],
+                    trade["Buy Time"],
+                    trade["Buy Fee"],
+                    trade["Sell Quantity"],
+                    trade["Sell Price"],
+                    trade["Sell Time"],
+                    trade["Sell Fee"],
+                    trade["Profit/Loss"],
                 ]
                 for trade in data
             ]
             worksheet.append_rows(records)
             logger.info(f"Wrote {len(records)} finished trades to {sheet_name}")
         else:
-            logger.error("Invalid write mode for Google Sheets. Specify is_active_assets or is_finished_trades.")
+            logger.error(
+                "Invalid write mode for Google Sheets. Specify is_active_assets or is_finished_trades."
+            )
     except Exception as e:
         logger.error(f"Error writing to Google Sheet {sheet_name}: {e}", exc_info=True)
+
 
 def load_active_assets(credentials_file, spreadsheet_name, sheet_name):
     """
@@ -157,10 +186,12 @@ def load_active_assets(credentials_file, spreadsheet_name, sheet_name):
     """
     try:
         scope = [
-            'https://spreadsheets.google.com/feeds',
-            'https://www.googleapis.com/auth/drive'
+            "https://spreadsheets.google.com/feeds",
+            "https://www.googleapis.com/auth/drive",
         ]
-        creds = ServiceAccountCredentials.from_json_keyfile_name(credentials_file, scope)
+        creds = ServiceAccountCredentials.from_json_keyfile_name(
+            credentials_file, scope
+        )
         client = gspread.authorize(creds)
         spreadsheet = client.open(spreadsheet_name)
         worksheet = spreadsheet.worksheet(sheet_name)
@@ -173,17 +204,21 @@ def load_active_assets(credentials_file, spreadsheet_name, sheet_name):
         assets = {}
         for row in records:
             try:
-                symbol = row[headers.index('Symbol')]
+                symbol = row[headers.index("Symbol")]
                 assets[symbol] = {
-                    'quantity': float(row[headers.index('Quantity')]),
-                    'purchase_price': float(row[headers.index('Buy Price')]),
-                    'purchase_time': datetime.strptime(row[headers.index('Buy Time')], '%Y-%m-%d %H:%M:%S'),
-                    'current_price': float(row[headers.index('Current Price')]),
-                    'highest_price': float(row[headers.index('Highest Price')]),
-                    'profit_target': float(row[headers.index('Profit Target')]),
-                    'original_profit_target': float(row[headers.index('Profit Target')]),
-                    'sell_price': float(row[headers.index('Sell Price')]),
-                    'take_action': row[headers.index('Take Action')]
+                    "quantity": float(row[headers.index("Quantity")]),
+                    "purchase_price": float(row[headers.index("Buy Price")]),
+                    "purchase_time": datetime.strptime(
+                        row[headers.index("Buy Time")], "%Y-%m-%d %H:%M:%S"
+                    ),
+                    "current_price": float(row[headers.index("Current Price")]),
+                    "highest_price": float(row[headers.index("Highest Price")]),
+                    "profit_target": float(row[headers.index("Profit Target")]),
+                    "original_profit_target": float(
+                        row[headers.index("Profit Target")]
+                    ),
+                    "sell_price": float(row[headers.index("Sell Price")]),
+                    "take_action": row[headers.index("Take Action")],
                 }
             except (IndexError, ValueError) as e:
                 logger.warning(f"Invalid row in {sheet_name}: {row}. Error: {e}")
@@ -191,5 +226,7 @@ def load_active_assets(credentials_file, spreadsheet_name, sheet_name):
         logger.info(f"Loaded {len(assets)} active assets from {sheet_name}")
         return assets
     except Exception as e:
-        logger.error(f"Error loading active assets from {sheet_name}: {e}", exc_info=True)
+        logger.error(
+            f"Error loading active assets from {sheet_name}: {e}", exc_info=True
+        )
         return {}
