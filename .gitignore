@@ -12,3 +12,5 @@ creds.json
 .pytest_cache/
 *.json.backup*
 state.json
+assets_bought/
+assets_sold/

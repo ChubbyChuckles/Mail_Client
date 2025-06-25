@@ -6,7 +6,6 @@ trading_bot/
 │   ├── portfolio.py            # Portfolio management (manage_portfolio, sell_asset, etc.)
 │   ├── data_processor.py       # Data verification and analysis (verify_and_analyze_data)
 │   ├── price_monitor.py        # Price monitoring logic (PriceMonitorManager)
-│   ├── notifications.py        # Telegram notifications (send_telegram_message, send_trade_notification)
 │   ├── storage.py              # Local storage and Google Sheets interactions (save_to_local, write_to_google_sheets)
 │   ├── utils.py                # Utility functions (calculate_ema, check_rate_limit, etc.)
 │   └── main.py                 # Main script to orchestrate the trading bot
@@ -17,7 +16,6 @@ trading_bot/
 │   ├── test_portfolio.py       # Tests for portfolio management
 │   ├── test_data_processor.py  # Tests for data processing
 │   ├── test_price_monitor.py   # Tests for price monitoring
-│   ├── test_notifications.py   # Tests for notifications
 │   ├── test_storage.py         # Tests for storage functions
 │   └── test_utils.py           # Tests for utility functions
 ├── .env.example                # Sample environment file

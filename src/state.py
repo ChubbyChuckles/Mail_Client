@@ -2,13 +2,13 @@
 import json
 import time
 from datetime import datetime
-from threading import Lock
+from threading import Lock, RLock
 
 from .config import PORTFOLIO_FILE, PORTFOLIO_VALUE, logger
 
 # Initialize global state
 portfolio = {"cash": PORTFOLIO_VALUE, "assets": {}}
-portfolio_lock = Lock()
+portfolio_lock = RLock()  # Use RLock instead of Lock
 rate_limit_lock = Lock()
 
 low_volatility_assets = set()
