@@ -3,8 +3,7 @@ import os
 
 import pandas as pd
 
-from .config import BUY_TRADES_CSV, logger
-
+from .config import BUY_TRADES_CSV, FINISHED_TRADES_CSV, logger
 
 def calculate_ema(prices, period):
     """
@@ -30,7 +29,6 @@ def calculate_ema(prices, period):
     except Exception as e:
         logger.error(f"Error calculating EMA: {e}")
         return None
-
 
 def calculate_dynamic_ema_period(
     holding_minutes, time_stop_minutes, active_assets, asset_threshold
@@ -63,7 +61,6 @@ def calculate_dynamic_ema_period(
         logger.error(f"Error calculating dynamic EMA period: {e}")
         return 5
 
-
 def append_to_buy_trades_csv(trade_data):
     """
     Appends buy trade data to a CSV file.
@@ -95,3 +92,38 @@ def append_to_buy_trades_csv(trade_data):
         )
     except Exception as e:
         logger.error(f"Error appending to {BUY_TRADES_CSV}: {e}")
+
+def append_to_finished_trades_csv(trade_data):
+    """
+    Appends finished trade data to a CSV file.
+
+    Args:
+        trade_data (dict): Dictionary containing finished trade details.
+    """
+    try:
+        file_exists = os.path.exists(FINISHED_TRADES_CSV)
+        with open(FINISHED_TRADES_CSV, "a", newline="") as f:
+            writer = csv.DictWriter(
+                f,
+                fieldnames=[
+                    "Symbol",
+                    "Buy Quantity",
+                    "Buy Price",
+                    "Buy Time",
+                    "Buy Fee",
+                    "Sell Quantity",
+                    "Sell Price",
+                    "Sell Time",
+                    "Sell Fee",
+                    "Profit/Loss",
+                    "Reason",
+                ],
+            )
+            if not file_exists:
+                writer.writeheader()
+            writer.writerow(trade_data)
+        logger.info(
+            f"Appended finished trade for {trade_data['Symbol']} to {FINISHED_TRADES_CSV}"
+        )
+    except Exception as e:
+        logger.error(f"Error appending to {FINISHED_TRADES_CSV}: {e}")

@@ -12,7 +12,6 @@ from .config import (CONCURRENT_REQUESTS, LOOP_INTERVAL_SECONDS,
                      PARQUET_FILENAME, RESULTS_FOLDER, logger)
 from .data_processor import verify_and_analyze_data
 from .exchange import bitvavo, check_rate_limit, fetch_klines
-from .notifications import run_async, send_telegram_message
 from .portfolio import manage_portfolio, save_portfolio
 from .price_monitor import PriceMonitorManager
 from .state import (ban_expiry_time, is_banned, low_volatility_assets,
@@ -37,17 +36,9 @@ def watchdog(price_monitor_manager):
                         f"API is banned until {datetime.utcfromtimestamp(ban_expiry_time)}. Stopping monitors and waiting..."
                     )
                     price_monitor_manager.stop_all()  # Stop all monitoring threads
-                    run_async(
-                        send_telegram_message(
-                            f"API banned until {datetime.utcfromtimestamp(ban_expiry_time)}. Waiting."
-                        )
-                    )
                     time.sleep(min(ban_expiry_time - current_time, 60))
                 else:
                     logger.error("Main loop hung without ban. Attempting recovery...")
-                    run_async(
-                        send_telegram_message("Main loop hung. Attempting recovery.")
-                    )
             time.sleep(10)
         except Exception as e:
             logger.error(f"Watchdog error: {e}", exc_info=True)
@@ -55,7 +46,6 @@ def watchdog(price_monitor_manager):
 
 def main():
     logger.info("Starting trading bot...")
-    run_async(send_telegram_message("Trading bot started."))
     price_monitor_manager = PriceMonitorManager()
     watchdog_thread = threading.Thread(
         target=watchdog, args=(price_monitor_manager,), daemon=True
@@ -192,15 +182,10 @@ def main():
         logger.info("Received shutdown signal. Stopping bot...")
         price_monitor_manager.stop_all()
         save_portfolio()
-        run_async(send_telegram_message("Trading bot stopped."))
-        from .notifications import shutdown_loop
-
-        shutdown_loop()
         logger.info("Bot stopped successfully.")
         sys.exit(0)
     except Exception as e:
         logger.error(f"Critical error in main loop: {e}", exc_info=True)
-        run_async(send_telegram_message(f"Main loop error: {e}. Continuing execution."))
         time.sleep(5)
 
 

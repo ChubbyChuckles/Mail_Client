@@ -30,14 +30,12 @@ logger.setLevel(logging.INFO)
 logger.addHandler(console_handler)
 logger.addHandler(file_handler)
 
-
 # Custom handler for evaluation logs
 class EvaluationLogHandler(logging.Handler):
     def emit(self, record):
         if record.levelno == logging.INFO and "Evaluation Decision" in record.msg:
             with open(log_filename, "a", encoding="utf-8") as f:
                 f.write(f"{record.asctime} [INFO] {record.msg}\n")
-
 
 evaluation_handler = EvaluationLogHandler()
 evaluation_handler.setFormatter(log_formatter)
@@ -63,11 +61,6 @@ RESULTS_FOLDER = os.getenv("RESULTS_FOLDER", "data_1m_pq_alot")
 PARQUET_FILENAME = os.getenv("PARQUET_FILENAME", "bitvavo_1min_candles_eur.parquet")
 PRICE_INCREASE_THRESHOLD = float(os.getenv("PRICE_INCREASE_THRESHOLD", 1.0))
 MIN_VOLUME_EUR = float(os.getenv("MIN_VOLUME_EUR", 10000))
-GOOGLE_SHEETS_CREDENTIALS = os.getenv("GOOGLE_SHEETS_CREDENTIALS", "creds.json")
-SPREADSHEET_NAME = os.getenv("SPREADSHEET_NAME", "Bitvavo_Trading_Results")
-ACTIVE_ASSETS_SHEET = os.getenv("ACTIVE_ASSETS_SHEET", "Active_Assets")
-TOP_COINS_SHEET = os.getenv("TOP_COINS_SHEET", "Top_Coins")
-FINISHED_TRADES_SHEET = os.getenv("FINISHED_TRADES_SHEET", "Finished_Trades")
 PORTFOLIO_VALUE = float(os.getenv("PORTFOLIO_VALUE", 10000))
 ALLOCATION_PER_TRADE = float(os.getenv("ALLOCATION_PER_TRADE", 0.1))
 BUY_FEE = float(os.getenv("BUY_FEE", 0.0015))
@@ -86,9 +79,9 @@ LOOP_INTERVAL_SECONDS = int(os.getenv("LOOP_INTERVAL_SECONDS", 70))
 MAX_ACTIVE_ASSETS = int(os.getenv("MAX_ACTIVE_ASSETS", 20))
 ASSET_THRESHOLD = int(MAX_ACTIVE_ASSETS * 0.6)
 INACTIVITY_TIMEOUT = int(os.getenv("INACTIVITY_TIMEOUT", 20))
-SHEETS_WRITE_INTERVAL = int(os.getenv("SHEETS_WRITE_INTERVAL", 300))
 PROFIT_TARGET_MULTIPLIER = float(os.getenv("PROFIT_TARGET_MULTIPLIER", 2.0))
 BUY_TRADES_CSV = os.getenv("BUY_TRADES_CSV", "buy_trades.csv")
+FINISHED_TRADES_CSV = os.getenv("FINISHED_TRADES_CSV", "finished_trades.csv")
 
 # Validate MAX_ACTIVE_ASSETS
 if MAX_ACTIVE_ASSETS < 1:

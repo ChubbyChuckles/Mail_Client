@@ -7,21 +7,30 @@ Modules include configuration, exchange interactions, portfolio management, data
 price monitoring, notifications, storage, utilities, and state management.
 """
 
-from .config import (API_KEY, API_SECRET, LOOP_INTERVAL_SECONDS,
-                     PORTFOLIO_VALUE, logger)
+from .config import (
+    API_KEY,
+    API_SECRET,
+    LOOP_INTERVAL_SECONDS,
+    PORTFOLIO_VALUE,
+    logger,
+)
 from .data_processor import verify_and_analyze_data
-from .exchange import (bitvavo, fetch_klines, fetch_ticker_price,
-                       fetch_trade_details)
+from .exchange import bitvavo, fetch_klines, fetch_ticker_price, fetch_trade_details
 from .main import main
-from .notifications import (run_async, send_telegram_message,
-                            send_trade_notification)
 from .portfolio import manage_portfolio, save_portfolio
 from .price_monitor import PriceMonitorManager
-from .state import (last_sheets_load, last_sheets_write, low_volatility_assets,
-                    negative_momentum_counts, portfolio, portfolio_lock)
-from .storage import load_active_assets, save_to_local, write_to_google_sheets
-from .utils import (append_to_buy_trades_csv, calculate_dynamic_ema_period,
-                    calculate_ema)
+from .state import (
+    low_volatility_assets,
+    negative_momentum_counts,
+    portfolio,
+    portfolio_lock,
+)
+from .storage import save_to_local
+from .utils import (
+    append_to_buy_trades_csv,
+    calculate_dynamic_ema_period,
+    calculate_ema,
+)
 
 __version__ = "0.1.0"  # Version of the trading bot package
 __all__ = [
@@ -40,7 +49,7 @@ __all__ = [
     "portfolio",
     "portfolio_lock",
     "manage_portfolio",
-    "price_monitor_manager",
+    "save_portfolio",
     # Data Processor
     "verify_and_analyze_data",
     # Price Monitor
@@ -51,9 +60,6 @@ __all__ = [
     "run_async",
     # Storage
     "save_to_local",
-    "save_portfolio",
-    "write_to_google_sheets",
-    "load_active_assets",
     # Utils
     "calculate_ema",
     "calculate_dynamic_ema_period",
