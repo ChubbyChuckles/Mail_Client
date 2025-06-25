@@ -3,11 +3,12 @@ import pytest
 import pandas as pd
 from unittest.mock import mock_open, patch
 import csv
+import logging
 
-from MAIL_CLIENT_TEST.src.utils import (
+from src.utils import (
     calculate_ema, calculate_dynamic_ema_period, append_to_buy_trades_csv, append_to_finished_trades_csv
 )
-from MAIL_CLIENT_TEST.src.config import logger
+from src.config import logger
 
 def test_calculate_ema_valid():
     """Test EMA calculation with valid input."""
