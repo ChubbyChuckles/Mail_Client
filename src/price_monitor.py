@@ -7,24 +7,26 @@ import numpy as np
 import pandas as pd
 from ccxt.base.errors import PermissionDenied
 
-from .config import (ACTIVE_ASSETS_SHEET, ADJUSTED_PROFIT_TARGET,
-                     ASSET_THRESHOLD, CAT_LOSS_THRESHOLD, CONCURRENT_REQUESTS,
-                     FINISHED_TRADES_SHEET, GOOGLE_SHEETS_CREDENTIALS,
-                     INACTIVITY_TIMEOUT, MIN_HOLDING_MINUTES,
-                     MOMENTUM_CONFIRM_MINUTES, MOMENTUM_THRESHOLD,
-                     PROFIT_TARGET_MULTIPLIER, RATE_LIMIT_WEIGHT,
-                     SHEETS_WRITE_INTERVAL, SPREADSHEET_NAME,
-                     TIME_STOP_MINUTES, TRAILING_STOP_FACTOR,
-                     TRAILING_STOP_FACTOR_EARLY, logger)
-from .exchange import (bitvavo, check_rate_limit, handle_ban_error, semaphore,
-                       wait_until_ban_lifted)
+from .config import (
+    ADJUSTED_PROFIT_TARGET,
+    ASSET_THRESHOLD,
+    CAT_LOSS_THRESHOLD,
+    CONCURRENT_REQUESTS,
+    INACTIVITY_TIMEOUT,
+    MIN_HOLDING_MINUTES,
+    MOMENTUM_CONFIRM_MINUTES,
+    MOMENTUM_THRESHOLD,
+    PROFIT_TARGET_MULTIPLIER,
+    RATE_LIMIT_WEIGHT,
+    TIME_STOP_MINUTES,
+    TRAILING_STOP_FACTOR,
+    TRAILING_STOP_FACTOR_EARLY,
+    logger,
+)
+from .exchange import bitvavo, check_rate_limit, handle_ban_error, semaphore, wait_until_ban_lifted
 from .portfolio import sell_asset
-from .state import (ban_expiry_time, is_banned, last_sheets_write,
-                    low_volatility_assets, negative_momentum_counts,
-                    weight_used)
-from .storage import write_to_google_sheets
+from .state import ban_expiry_time, is_banned, low_volatility_assets, negative_momentum_counts, weight_used
 from .utils import calculate_dynamic_ema_period, calculate_ema
-
 
 class PriceMonitorManager:
     def __init__(self):
@@ -42,7 +44,6 @@ class PriceMonitorManager:
             CONCURRENT_REQUESTS = max_threads
             current_threads = len(self.threads)
             if current_threads > max_threads:
-                # Stop oldest threads to meet new limit
                 threads_to_stop = sorted(
                     self.threads.items(), key=lambda x: self.last_update.get(x[0], 0)
                 )[: current_threads - max_threads]
@@ -67,7 +68,6 @@ class PriceMonitorManager:
         try:
             logger.info(f"Started price monitoring for {symbol}")
             while symbol in self.running and self.running[symbol]:
-                # Check for API ban
                 if is_banned and time.time() < ban_expiry_time:
                     logger.warning(
                         f"API banned until {datetime.utcfromtimestamp(ban_expiry_time)}. Pausing {symbol}."
@@ -75,8 +75,7 @@ class PriceMonitorManager:
                     wait_until_ban_lifted(ban_expiry_time)
                     continue
                 try:
-                    # Use rate limit check and semaphore
-                    check_rate_limit(1)  # Assume fetch_ticker has weight of 1
+                    check_rate_limit(1)
                     with semaphore:
                         ticker = self.exchange.fetch_ticker(symbol)
                         if not isinstance(ticker, dict) or "last" not in ticker:
@@ -102,14 +101,12 @@ class PriceMonitorManager:
                         current_time = datetime.utcnow()
                         current_second = current_time.replace(microsecond=0)
                         self.last_update[symbol] = time.time()
-                        # Update portfolio
                         with portfolio_lock:
                             if symbol in portfolio["assets"]:
                                 portfolio["assets"][symbol]["current_price"] = price
                                 portfolio["assets"][symbol]["highest_price"] = max(
                                     portfolio["assets"][symbol]["highest_price"], price
                                 )
-                        # Candle logic
                         if (
                             last_candle_time is None
                             or current_second > last_candle_time
@@ -143,7 +140,6 @@ class PriceMonitorManager:
                             for c in candles
                             if (current_time - c["timestamp"]).total_seconds() <= 5
                         ]
-                        # Inactivity check
                         if time.time() - self.last_update[symbol] > INACTIVITY_TIMEOUT:
                             logger.info(
                                 f"{symbol} inactive for {INACTIVITY_TIMEOUT} seconds. Marking as low volatility."
@@ -152,7 +148,7 @@ class PriceMonitorManager:
                                 low_volatility_assets.add(symbol)
                             self.stop(symbol)
                             break
-                        time.sleep(1)  # Increase sleep time to reduce API calls
+                        time.sleep(1)
                 except PermissionDenied as e:
                     ban_expiry = handle_ban_error(e)
                     if ban_expiry:
@@ -326,7 +322,7 @@ class PriceMonitorManager:
                         )
                     )
                 )
-                sell_asset(
+                finished_trade = sell_asset(
                     symbol,
                     asset,
                     current_price,
@@ -336,26 +332,9 @@ class PriceMonitorManager:
                     reason,
                     price_monitor_manager=None,
                 )
-                global last_sheets_write
-                if (
-                    time.time() - last_sheets_write >= SHEETS_WRITE_INTERVAL
-                    or reason == "Catastrophic loss"
-                ):
-                    write_to_google_sheets(
-                        [],
-                        GOOGLE_SHEETS_CREDENTIALS,
-                        SPREADSHEET_NAME,
-                        FINISHED_TRADES_SHEET,
-                        is_finished_trades=True,
-                    )
-                    write_to_google_sheets(
-                        portfolio["assets"],
-                        GOOGLE_SHEETS_CREDENTIALS,
-                        SPREADSHEET_NAME,
-                        ACTIVE_ASSETS_SHEET,
-                        is_active_assets=True,
-                    )
-                    last_sheets_write = time.time()
+                if finished_trade:
+                    from .utils import append_to_finished_trades_csv
+                    append_to_finished_trades_csv(finished_trade)
 
     def start(self, symbol, portfolio, portfolio_lock, candles_df):
         """
@@ -377,7 +356,7 @@ class PriceMonitorManager:
                     return
                 if (
                     weight_used + 2 > RATE_LIMIT_WEIGHT * 0.8
-                ):  # Increase threshold to 80%
+                ):
                     logger.warning(
                         f"Approaching rate limit ({weight_used}). Delaying monitoring for {symbol}."
                     )
@@ -425,7 +404,6 @@ class PriceMonitorManager:
                     f"Error stopping price monitor for {symbol}: {e}", exc_info=True
                 )
             finally:
-                # Ensure thread is removed even on error
                 self.threads.pop(symbol, None)
                 self.running.pop(symbol, None)
 

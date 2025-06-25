@@ -13,13 +13,10 @@ rate_limit_lock = Lock()
 
 low_volatility_assets = set()
 negative_momentum_counts = {}
-last_sheets_write = 0
-last_sheets_load = 0
 weight_used = 0
 last_reset_time = time.time()
 is_banned = False
 ban_expiry_time = 0
-
 
 def load_portfolio():
     global portfolio
@@ -76,14 +73,11 @@ def load_portfolio():
             )
             portfolio = {"cash": PORTFOLIO_VALUE, "assets": {}}
 
-
 def save_state():
     try:
         state = {
             "low_volatility_assets": list(low_volatility_assets),
             "negative_momentum_counts": negative_momentum_counts,
-            "last_sheets_write": last_sheets_write,
-            "last_sheets_load": last_sheets_load,
             "weight_used": weight_used,
             "last_reset_time": last_reset_time,
         }
@@ -93,22 +87,18 @@ def save_state():
     except Exception as e:
         logger.error(f"Error saving state: {e}", exc_info=True)
 
-
 def load_state():
-    global low_volatility_assets, negative_momentum_counts, last_sheets_write, last_sheets_load, weight_used, last_reset_time
+    global low_volatility_assets, negative_momentum_counts, weight_used, last_reset_time
     try:
         with open("state.json", "r") as f:
             state = json.load(f)
             low_volatility_assets = set(state.get("low_volatility_assets", []))
             negative_momentum_counts = state.get("negative_momentum_counts", {})
-            last_sheets_write = state.get("last_sheets_write", 0)
-            last_sheets_load = state.get("last_sheets_load", 0)
             weight_used = state.get("weight_used", 0)
             last_reset_time = state.get("last_reset_time", time.time())
         logger.info("Loaded state from state.json")
     except Exception as e:
         logger.error(f"Error loading state: {e}", exc_info=True)
-
 
 # Call load_portfolio() at startup
 load_portfolio()

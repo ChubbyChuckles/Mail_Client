@@ -97,7 +97,7 @@ def check_rate_limit(request_weight):
         logger.debug(
             f"Checking rate limit: weight_used={weight_used}, request_weight={request_weight}, total={weight_used + request_weight}, limit={RATE_LIMIT_WEIGHT}"
         )
-        if (weight_used + request_weight) > RATE_LIMIT_WEIGHT * 0.5:
+        if (weight_used + request_weight) > RATE_LIMIT_WEIGHT * 0.9:
             sleep_time = 60 - (current_time - last_reset_time)
             if sleep_time > 0:
                 logger.info(
