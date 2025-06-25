@@ -31,7 +31,7 @@ from .config import (
 )
 from .exchange import fetch_ticker_price, fetch_trade_details
 from .state import low_volatility_assets, negative_momentum_counts, portfolio, portfolio_lock
-from .utils import append_to_buy_trades_csv, calculate_dynamic_ema_period, calculate_ema
+from .utils import append_to_buy_trades_csv, calculate_dynamic_ema_period, calculate_ema, append_to_finished_trades_csv
 
 def sell_asset(
     symbol,
@@ -62,7 +62,7 @@ def sell_asset(
             buy_value = asset["quantity"] * asset["purchase_price"]
             buy_fee = buy_value * BUY_FEE
             profit_loss = net_sale_value - (buy_value + buy_fee)
-            portfolio["cash"] += net_sale_value  # Update cash balance
+            portfolio["cash"] += net_sale_value
             finished_trade = {
                 "Symbol": symbol,
                 "Buy Quantity": f"{asset['quantity']:.10f}",
@@ -86,11 +86,13 @@ def sell_asset(
             low_volatility_assets.discard(symbol)
             negative_momentum_counts.pop(symbol, None)
             logger.debug(f"Updated portfolio state for {symbol}")
+        
+        # Move post-sale actions outside the lock
         try:
-            price_monitor_manager.stop(symbol)
-
-            # Append to finished_trades.csv
-            from .utils import append_to_finished_trades_csv
+            if price_monitor_manager:
+                price_monitor_manager.stop(symbol)
+            else:
+                logger.warning(f"Price monitor manager is None for {symbol}. Cannot stop monitoring.")
             append_to_finished_trades_csv(finished_trade)
         except Exception as e:
             logger.error(f"Failed to process post-sale actions for {symbol}: {e}")
@@ -100,7 +102,7 @@ def sell_asset(
         raise
 
 def sell_most_profitable_asset(
-    portfolio, portfolio_lock, percent_changes, finished_trades
+    portfolio, portfolio_lock, percent_changes, finished_trades, price_monitor_manager=None
 ):
     """
     Sells the most profitable asset to free up a portfolio slot.
@@ -156,7 +158,7 @@ def sell_most_profitable_asset(
             portfolio_lock,
             finished_trades,
             "Sold to free up slot for new buy",
-            price_monitor_manager=None,
+            price_monitor_manager=price_monitor_manager,
         )
 
 def save_portfolio():
@@ -258,7 +260,7 @@ def manage_portfolio(above_threshold_data, percent_changes, price_monitor_manage
                 else:
                     finished_trades.append(
                         sell_most_profitable_asset(
-                            portfolio, portfolio_lock, percent_changes, finished_trades
+                            portfolio, portfolio_lock, percent_changes, finished_trades, price_monitor_manager=price_monitor_manager
                         )
                     )
 
@@ -450,7 +452,7 @@ def manage_portfolio(above_threshold_data, percent_changes, price_monitor_manage
                             portfolio_lock,
                             finished_trades,
                             reason,
-                            price_monitor_manager,
+                            price_monitor_manager=price_monitor_manager,
                         )
                     )
 
@@ -507,7 +509,7 @@ def manage_portfolio(above_threshold_data, percent_changes, price_monitor_manage
                     )
                     finished_trades.append(
                         sell_most_profitable_asset(
-                            portfolio, portfolio_lock, percent_changes, finished_trades
+                            portfolio, portfolio_lock, percent_changes, finished_trades, price_monitor_manager=price_monitor_manager
                         )
                     )
                 elif symbol in portfolio["assets"]:

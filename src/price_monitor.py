@@ -67,7 +67,7 @@ class PriceMonitorManager:
         self.last_update[symbol] = time.time()
         try:
             logger.info(f"Started price monitoring for {symbol}")
-            while symbol in self.running and self.running[symbol]:
+            while self.running.get(symbol, False):  # Check running flag
                 if is_banned and time.time() < ban_expiry_time:
                     logger.warning(
                         f"API banned until {datetime.utcfromtimestamp(ban_expiry_time)}. Pausing {symbol}."
@@ -79,12 +79,8 @@ class PriceMonitorManager:
                     with semaphore:
                         ticker = self.exchange.fetch_ticker(symbol)
                         if not isinstance(ticker, dict) or "last" not in ticker:
-                            logger.error(
-                                f"Invalid ticker response for {symbol}: {ticker}"
-                            )
-                            self.ticker_errors[symbol] = (
-                                self.ticker_errors.get(symbol, 0) + 1
-                            )
+                            logger.error(f"Invalid ticker response for {symbol}: {ticker}")
+                            self.ticker_errors[symbol] = self.ticker_errors.get(symbol, 0) + 1
                             if self.ticker_errors[symbol] >= 3:
                                 logger.warning(
                                     f"{symbol} has {self.ticker_errors[symbol]} ticker errors. Marking as low volatility."
@@ -101,24 +97,18 @@ class PriceMonitorManager:
                         current_time = datetime.utcnow()
                         current_second = current_time.replace(microsecond=0)
                         self.last_update[symbol] = time.time()
-                        with portfolio_lock:
-                            if symbol in portfolio["assets"]:
-                                portfolio["assets"][symbol]["current_price"] = price
-                                portfolio["assets"][symbol]["highest_price"] = max(
-                                    portfolio["assets"][symbol]["highest_price"], price
-                                )
-                        if (
-                            last_candle_time is None
-                            or current_second > last_candle_time
-                        ):
+                        # Minimize lock scope
+                        if self.running.get(symbol, False):  # Re-check before lock
+                            with portfolio_lock:
+                                if symbol in portfolio["assets"]:
+                                    portfolio["assets"][symbol]["current_price"] = price
+                                    portfolio["assets"][symbol]["highest_price"] = max(
+                                        portfolio["assets"][symbol]["highest_price"], price
+                                    )
+                        if last_candle_time is None or current_second > last_candle_time:
                             if candles:
                                 self.evaluate_candle(
-                                    candles[-1],
-                                    symbol,
-                                    portfolio,
-                                    portfolio_lock,
-                                    candles,
-                                    candles_df,
+                                    candles[-1], symbol, portfolio, portfolio_lock, candles, candles_df
                                 )
                             candles.append(
                                 {
@@ -136,8 +126,7 @@ class PriceMonitorManager:
                             candles[-1]["low"] = min(candles[-1]["low"], price)
                             candles[-1]["close"] = price
                         candles = [
-                            c
-                            for c in candles
+                            c for c in candles
                             if (current_time - c["timestamp"]).total_seconds() <= 5
                         ]
                         if time.time() - self.last_update[symbol] > INACTIVITY_TIMEOUT:
@@ -330,7 +319,7 @@ class PriceMonitorManager:
                     portfolio_lock,
                     [],
                     reason,
-                    price_monitor_manager=None,
+                    price_monitor_manager=self,
                 )
                 if finished_trade:
                     from .utils import append_to_finished_trades_csv
