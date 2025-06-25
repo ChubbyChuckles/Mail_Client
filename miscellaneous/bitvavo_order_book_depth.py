@@ -25,11 +25,13 @@ logger = logging.getLogger(__name__)
 load_dotenv()
 API_KEY = os.getenv("BITVAVO_API_KEY") or os.getenv("APIKEY")
 API_SECRET = os.getenv("BITVAVO_API_SECRET") or os.getenv("SECKEY")
-SNAPSHOTS_DIR = os.getenv("ORDER_BOOK_SNAPSHOTS_DIR", "order_book_snapshots")
-MAX_DEPTH = int(os.getenv("ORDER_BOOK_DEPTH", 200))
-MAX_PROCESSES = int(os.getenv("MAX_PROCESSES", 4))  # Reduced to 4
+SNAPSHOTS_DIR = os.getenv("ORDER_BOOK_SNAPSHOTS_DIR", "F:\Order_Book_Data")
+MAX_DEPTH = int(os.getenv("ORDER_BOOK_DEPTH", 1000))
+MAX_PROCESSES = int(os.getenv("MAX_PROCESSES", 4))
 RATE_LIMIT_WEIGHT = 900  # 90% of 1000 weight units
 CYCLE_DURATION = 58  # 58 seconds for buffer
+TOP_COINS_FILE = "top_coins.json"
+TOP_COINS_LIMIT = 300
 
 if not API_KEY or not API_SECRET:
     logger.error("API_KEY or API_SECRET not found in .env file")
@@ -76,6 +78,61 @@ def wait_for_minute_reset(bitvavo):
         sleep_time = max(0, seconds_until_reset - 0.5)
         logger.debug(f"Waiting {sleep_time:.2f} seconds for next minute reset.")
         time.sleep(sleep_time)
+
+def fetch_top_coins(bitvavo, limit=TOP_COINS_LIMIT):
+    """Fetch the top coins by 24-hour volume and save to top_coins.json."""
+    try:
+        tickers = bitvavo.ticker24h({})
+        if not tickers:
+            logger.error("No ticker data received.")
+            return []
+        
+        # Filter for EUR pairs and sort by volume
+        eur_tickers = [
+            ticker for ticker in tickers
+            if ticker.get('market', '').endswith('-EUR')
+            and ticker.get('volume', 0) is not None
+        ]
+        sorted_tickers = sorted(
+            eur_tickers,
+            key=lambda x: float(x.get('volume', 0)),
+            reverse=True
+        )
+        
+        # Extract top coins (market symbols in ccxt format, e.g., 'BTC/EUR')
+        top_coins = [ticker['market'].replace('-', '/') for ticker in sorted_tickers[:limit]]
+        
+        # Save to top_coins.json
+        try:
+            with open(TOP_COINS_FILE, 'w') as f:
+                json.dump({'coins': top_coins, 'timestamp': datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')}, f, indent=4)
+            logger.info(f"Saved {len(top_coins)} top coins to {TOP_COINS_FILE}")
+        except Exception as e:
+            logger.error(f"Error saving top coins to {TOP_COINS_FILE}: {e}")
+        
+        return top_coins
+    
+    except Exception as e:
+        logger.error(f"Error fetching top coins: {e}")
+        return []
+
+def load_top_coins():
+    """Load top coins from top_coins.json if it exists."""
+    if not os.path.exists(TOP_COINS_FILE):
+        logger.info(f"{TOP_COINS_FILE} does not exist. Will fetch top coins.")
+        return None
+    try:
+        with open(TOP_COINS_FILE, 'r') as f:
+            data = json.load(f)
+        coins = data.get('coins', [])
+        if not coins:
+            logger.warning(f"No coins found in {TOP_COINS_FILE}")
+            return None
+        logger.info(f"Loaded {len(coins)} top coins from {TOP_COINS_FILE}")
+        return coins
+    except Exception as e:
+        logger.error(f"Error loading top coins from {TOP_COINS_FILE}: {e}")
+        return None
 
 def fetch_order_book_snapshot(symbol, depth=MAX_DEPTH, per_request_delay=0):
     """Fetch order book snapshot with dynamic delay adjustment."""
@@ -147,7 +204,7 @@ def extract_snapshot_by_symbol(filename, symbol):
             logger.info(f"Extracted snapshot for {symbol} from {filename}")
             return snapshot
         else:
-            logger.error(f"No snapshot found for {symbol} in {filename}")
+            logger.error(f"No snapshot found for {symbol} in {TOP_COINS_FILE}")
             return None
     except Exception as e:
         logger.error(f"Error extracting snapshot for {symbol} from {filename}: {e}")
@@ -170,14 +227,16 @@ def main():
         })
         logger.info("Bitvavo clients initialized successfully.")
         
-        # Load markets
-        markets = bitvavo_ccxt.load_markets()
-        eur_pairs = [symbol for symbol in markets if symbol.endswith('/EUR')]
-        logger.info(f"Found {len(eur_pairs)} -EUR pairs: {', '.join(eur_pairs)}")
+        # Load or fetch top coins
+        eur_pairs = load_top_coins()
+        if eur_pairs is None:
+            logger.info("Fetching top coins by volume.")
+            eur_pairs = fetch_top_coins(bitvavo_api, limit=TOP_COINS_LIMIT)
+            if not eur_pairs:
+                logger.error("No top coins retrieved. Exiting.")
+                return
         
-        if not eur_pairs:
-            logger.error("No -EUR pairs found. Exiting.")
-            return
+        logger.info(f"Processing {len(eur_pairs)} -EUR pairs: {', '.join(eur_pairs[:5])}...")
         
         # Create snapshot directory
         os.makedirs(SNAPSHOTS_DIR, exist_ok=True)
@@ -248,7 +307,12 @@ def main():
             if final_remaining is not None:
                 logger.info(f"Rate limit after cycle: {final_remaining}/1000")
             
-           
+            # Demonstrate extraction (example for BTC-EUR)
+            if "BTC-EUR" in snapshots:
+                extracted = extract_snapshot_by_symbol(filename, "BTC-EUR")
+                if extracted:
+                    logger.info(f"Example extraction: BTC-EUR snapshot has {len(extracted['bids'])} bids, "
+                                f"{len(extracted['asks'])} asks")
             
             # Check for rate limit issues
             if final_remaining is not None and final_remaining < 100:
