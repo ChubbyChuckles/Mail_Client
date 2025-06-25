@@ -134,7 +134,7 @@ if __name__ == "__main__":
     # Example: Predict slippage for buying and selling 5.5 EUR worth of BTC
     for side in ['buy', 'sell']:
         result = predict_slippage(
-            market='ZKJ-EUR',
+            market='BTC-EUR',
             amount_quote=5500,
             side=side
         )
