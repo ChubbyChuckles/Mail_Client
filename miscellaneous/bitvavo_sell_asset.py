@@ -1,11 +1,14 @@
-import logging
 import json
+import logging
 import os
 from datetime import datetime
 from urllib.parse import urlencode
+
 import requests
 from python_bitvavo_api.bitvavo import Bitvavo
-from src.config import API_KEY, API_SECRET  # Replace with your config or use env variables
+
+from src.config import (  # Replace with your config or use env variables
+    API_KEY, API_SECRET)
 
 # Configure logging
 logging.basicConfig(
@@ -25,6 +28,7 @@ bitvavo = Bitvavo(
 
 # Base URL for direct REST API calls
 BASE_URL = "https://api.bitvavo.com/v2"
+
 
 def get_rate_limit_remaining(endpoint="/time", params=None):
     """Fetch the remaining rate limit weight using a direct REST call."""
@@ -46,110 +50,117 @@ def get_rate_limit_remaining(endpoint="/time", params=None):
             return get_rate_limit_remaining(endpoint="/markets")
         return None
 
+
 def sell_crypto_asset(symbol, amount_quote):
     """
     Sells a specified amount in EUR of a crypto asset on Bitvavo with a market order,
     calculates slippage, and saves response (including slippage) as JSON in assets_sold directory.
-    
+
     Parameters:
     - symbol (str): The asset symbol (e.g., 'BTC' for Bitcoin).
     - amount_quote (float): Amount in EUR to sell (e.g., 5.5 EUR).
-    
+
     Returns:
     - dict: Response with order details and slippage percentage (if available).
     """
     try:
         # Construct market pair (assuming EUR as quote currency)
         market = f"{symbol}-EUR"
-        
+
         # Check rate limit before proceeding
         rate_limit = get_rate_limit_remaining()
         if rate_limit is not None and rate_limit < 10:
             logger.warning(f"Low rate limit remaining: {rate_limit}. Aborting order.")
-            return {'error': f"Low rate limit remaining: {rate_limit}"}
-        
-        logger.info(f"Placing market sell order for {amount_quote} EUR of {symbol} on {market}")
-        
+            return {"error": f"Low rate limit remaining: {rate_limit}"}
+
+        logger.info(
+            f"Placing market sell order for {amount_quote} EUR of {symbol} on {market}"
+        )
+
         # Get the current market price from the order book for slippage calculation
-        order_book = bitvavo.book(market, {'depth': 1})
-        if not order_book.get('asks'):
+        order_book = bitvavo.book(market, {"depth": 1})
+        if not order_book.get("asks"):
             logger.error("Failed to retrieve order book")
-            return {'error': 'Failed to retrieve order book'}
-        
+            return {"error": "Failed to retrieve order book"}
+
         # Use the best ask price as the expected price (for selling)
-        expected_price = float(order_book['asks'][0][0])
+        expected_price = float(order_book["asks"][0][0])
         logger.info(f"Expected price: {expected_price} EUR")
-        
+
         # Prepare body for market order
-        body = {
-            'amountQuote': str(amount_quote)
-        }
-        
+        body = {"amountQuote": str(amount_quote)}
+
         # Place market sell order
-        response = bitvavo.placeOrder(market, 'sell', 'market', body)
-        
+        response = bitvavo.placeOrder(market, "sell", "market", body)
+
         # Check if order was successful
-        if 'orderId' not in response:
-            logger.error(f"Error placing order: {response.get('error', 'Unknown error')}")
-            return {'error': response.get('error', 'Unknown error')}
-        
+        if "orderId" not in response:
+            logger.error(
+                f"Error placing order: {response.get('error', 'Unknown error')}"
+            )
+            return {"error": response.get("error", "Unknown error")}
+
         # Extract actual price from the fills array
-        fills = response.get('fills', [])
+        fills = response.get("fills", [])
         if not fills:
-            logger.warning("No fills found in order response. Cannot calculate slippage.")
-            response['slip'] = None
+            logger.warning(
+                "No fills found in order response. Cannot calculate slippage."
+            )
+            response["slip"] = None
         else:
             # Calculate weighted average price from fills
             total_amount = 0
             weighted_price_sum = 0
             for fill in fills:
-                fill_amount = float(fill.get('amount', 0))
-                price = float(fill.get('price', 0))
+                fill_amount = float(fill.get("amount", 0))
+                price = float(fill.get("price", 0))
                 if fill_amount == 0 or price == 0:
-                    logger.warning(f"Invalid fill data: amount={fill_amount}, price={price}")
+                    logger.warning(
+                        f"Invalid fill data: amount={fill_amount}, price={price}"
+                    )
                     continue
                 total_amount += fill_amount
                 weighted_price_sum += fill_amount * price
-            
+
             if total_amount == 0:
                 logger.warning("Unable to calculate actual price from fills")
-                response['slip'] = None
+                response["slip"] = None
             else:
                 actual_price = weighted_price_sum / total_amount
-                slippage_percent = ((actual_price - expected_price) / expected_price) * 100
+                slippage_percent = (
+                    (actual_price - expected_price) / expected_price
+                ) * 100
                 logger.info(f"Actual price: {actual_price} EUR")
                 logger.info(f"Slippage: {slippage_percent:.2f}%")
-                response['slip'] = slippage_percent
-        
+                response["slip"] = slippage_percent
+
         # Save response as JSON in assets_sold directory (including slippage)
         try:
             directory = "assets_sold"
             if not os.path.exists(directory):
                 os.makedirs(directory)
-            
+
             # Generate sensible file name: market_orderId_timestamp.json
-            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             file_name = f"{market}_{response.get('orderId')}_{timestamp}.json"
             file_path = os.path.join(directory, file_name)
-            
+
             # Write response to JSON file
-            with open(file_path, 'w') as json_file:
+            with open(file_path, "w") as json_file:
                 json.dump(response, json_file, indent=4)
             logger.info(f"Sell order response saved to: {file_path}")
         except Exception as e:
             logger.error(f"Error saving JSON file: {str(e)}")
-        
+
         logger.info(f"Sell order placed successfully: {response['orderId']}")
         return response
-        
+
     except Exception as e:
         logger.error(f"An error occurred: {str(e)}")
-        return {'error': str(e)}
+        return {"error": str(e)}
+
 
 # Example usage
 if __name__ == "__main__":
     # Example: Sell 5.5 EUR worth of Bitcoin
-    result = sell_crypto_asset(
-        symbol='BTC',
-        amount_quote=5.5
-    )
+    result = sell_crypto_asset(symbol="BTC", amount_quote=5.5)

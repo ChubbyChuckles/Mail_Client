@@ -3,11 +3,12 @@ from datetime import datetime, timedelta
 
 import pandas as pd
 
-from .config import MIN_VOLUME_EUR, PRICE_INCREASE_THRESHOLD, logger
-from .state import low_volatility_assets, portfolio, portfolio_lock
-from .config import AMOUNT_QUOTE, PRICE_RANGE_PERCENT
-from .exchange import check_rate_limit, semaphore
 from .bitvavo_order_metrics import calculate_order_book_metrics
+from .config import (AMOUNT_QUOTE, MIN_VOLUME_EUR, PRICE_INCREASE_THRESHOLD,
+                     PRICE_RANGE_PERCENT, logger)
+from .exchange import check_rate_limit, semaphore
+from .state import low_volatility_assets, portfolio, portfolio_lock
+
 
 def verify_and_analyze_data(df, price_monitor_manager):
     """
@@ -67,13 +68,13 @@ def verify_and_analyze_data(df, price_monitor_manager):
     # Calculate order book metrics for coins above threshold
     for _, row in above_threshold.iterrows():
         symbol = row["symbol"]
-        logger.info(f"Calculating order book metrics for {symbol} (above threshold)")
+        # logger.info(f"Calculating order book metrics for {symbol} (above threshold)")
         with semaphore:
             check_rate_limit(1)  # Assume order book fetch has weight of 2
             metrics = calculate_order_book_metrics(
                 market=symbol.replace("/", "-"),
                 amount_quote=AMOUNT_QUOTE,
-                price_range_percent=PRICE_RANGE_PERCENT
+                price_range_percent=PRICE_RANGE_PERCENT,
             )
             metrics["bought"] = False  # Will be updated in portfolio.py if bought
             order_book_metrics_list.append(metrics)
@@ -83,11 +84,20 @@ def verify_and_analyze_data(df, price_monitor_manager):
             f"\nCoins with price increase >= {PRICE_INCREASE_THRESHOLD}% and volume >= €{MIN_VOLUME_EUR}:"
         )
         for _, row in above_threshold.iterrows():
+
             logger.info(
-                f"Symbol: {row['symbol']}, Change: {row['percent_change']:.2f}%, "
-                f"Open: {row['open_price']:.2f}, Close: {row['close_price']:.2f}, "
-                f"Volume: {row['volume_eur']:.2f} EUR, Timestamp: {row['latest_timestamp']}"
+                f"Symbol: {row['symbol']:<12}  "
+                f"Change: {row['percent_change']:>6.3f}%  "
+                f"Volume: {row['volume_eur']:>10.2f}€  "
+                f"Open: {row['open_price']:>12.8f}  "
+                f"Close: {row['close_price']:>12.8f}  "
+                f"Slippage Buy: {metrics['slippage_buy']:>7.3f}%  "
+                f"Slippage Sell: {metrics['slippage_sell']:>7.3f}%  "
+                f"Total Score: {metrics['total_score']:>4.2f}  "
+                f"Recommendation: {metrics['recommendation']:<10}  "
+                f"Latest Timestamp: {row['latest_timestamp']}"
             )
+
     else:
         logger.info(
             f"No coins with price increase >= {PRICE_INCREASE_THRESHOLD}% and volume >= €{MIN_VOLUME_EUR}"
@@ -102,23 +112,32 @@ def verify_and_analyze_data(df, price_monitor_manager):
         ).head(5)
         logger.info(f"\nTop 5 coins with price increase < {PRICE_INCREASE_THRESHOLD}%:")
         for _, row in top_5_below.iterrows():
-            logger.info(
-                f"Symbol: {row['symbol']}, Change: {row['percent_change']:.2f}%, "
-                f"Open: {row['open_price']:.2f}, Close: {row['close_price']:.2f}, "
-                f"Volume: {row['volume_eur']:.2f} EUR, Timestamp: {row['latest_timestamp']}"
-            )
+
             # Calculate order book metrics for top 5 below threshold
             symbol = row["symbol"]
-            logger.info(f"Calculating order book metrics for {symbol} (below threshold)")
+            # logger.info(f"Calculating order book metrics for {symbol} (below threshold)")
             with semaphore:
                 check_rate_limit(1)
                 metrics = calculate_order_book_metrics(
                     market=symbol.replace("/", "-"),
                     amount_quote=AMOUNT_QUOTE,
-                    price_range_percent=PRICE_RANGE_PERCENT
+                    price_range_percent=PRICE_RANGE_PERCENT,
                 )
                 metrics["bought"] = False
                 order_book_metrics_list.append(metrics)
+
+            logger.info(
+                f"Symbol: {row['symbol']:<12}  "
+                f"Change: {row['percent_change']:>6.3f}%  "
+                f"Volume: {row['volume_eur']:>10.2f}€  "
+                f"Open: {row['open_price']:>12.8f}  "
+                f"Close: {row['close_price']:>12.8f}  "
+                f"Slippage Buy: {metrics['slippage_buy']:>7.3f}%  "
+                f"Slippage Sell: {metrics['slippage_sell']:>7.3f}%  "
+                f"Total Score: {metrics['total_score']:>4.2f}  "
+                f"Recommendation: {metrics['recommendation']:<10}  "
+                f"Latest Timestamp: {row['latest_timestamp']}"
+            )
     else:
         logger.info(f"No coins with price increase < {PRICE_INCREASE_THRESHOLD}%")
 

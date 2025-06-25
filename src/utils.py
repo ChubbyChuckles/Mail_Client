@@ -1,10 +1,12 @@
 import csv
 import os
+from datetime import datetime
 
 import pandas as pd
 
-from .config import ORDER_BOOK_METRICS_CSV, BUY_TRADES_CSV, FINISHED_TRADES_CSV, logger
-from datetime import datetime
+from .config import (BUY_TRADES_CSV, FINISHED_TRADES_CSV,
+                     ORDER_BOOK_METRICS_CSV, logger)
+
 
 def calculate_ema(prices, period):
     """
@@ -30,6 +32,7 @@ def calculate_ema(prices, period):
     except Exception as e:
         logger.error(f"Error calculating EMA: {e}")
         return None
+
 
 def calculate_dynamic_ema_period(
     holding_minutes, time_stop_minutes, active_assets, asset_threshold
@@ -62,6 +65,7 @@ def calculate_dynamic_ema_period(
         logger.error(f"Error calculating dynamic EMA period: {e}")
         return 5
 
+
 def append_to_buy_trades_csv(trade_data):
     """
     Appends buy trade data to a CSV file.
@@ -93,6 +97,7 @@ def append_to_buy_trades_csv(trade_data):
         )
     except Exception as e:
         logger.error(f"Error appending to {BUY_TRADES_CSV}: {e}")
+
 
 def append_to_finished_trades_csv(trade_data):
     """
@@ -128,6 +133,7 @@ def append_to_finished_trades_csv(trade_data):
         )
     except Exception as e:
         logger.error(f"Error appending to {FINISHED_TRADES_CSV}: {e}")
+
 
 def append_to_order_book_metrics_csv(metrics_list):
     """
@@ -178,10 +184,14 @@ def append_to_order_book_metrics_csv(metrics_list):
                     "Market": metrics.get("market"),
                     "Nonce": metrics.get("nonce"),
                     "Best_Bid": (
-                        f"{metrics['best_bid']:.2f}" if metrics.get("best_bid") else None
+                        f"{metrics['best_bid']:.2f}"
+                        if metrics.get("best_bid")
+                        else None
                     ),
                     "Best_Ask": (
-                        f"{metrics['best_ask']:.2f}" if metrics.get("best_ask") else None
+                        f"{metrics['best_ask']:.2f}"
+                        if metrics.get("best_ask")
+                        else None
                     ),
                     "Spread": (
                         f"{metrics['spread']:.2f}" if metrics.get("spread") else None
@@ -192,28 +202,44 @@ def append_to_order_book_metrics_csv(metrics_list):
                         else None
                     ),
                     "Mid_Price": (
-                        f"{metrics['mid_price']:.2f}" if metrics.get("mid_price") else None
+                        f"{metrics['mid_price']:.2f}"
+                        if metrics.get("mid_price")
+                        else None
                     ),
                     "Buy_Depth": (
-                        f"{metrics['buy_depth']:.2f}" if metrics.get("buy_depth") else None
+                        f"{metrics['buy_depth']:.2f}"
+                        if metrics.get("buy_depth")
+                        else None
                     ),
                     "Sell_Depth": (
-                        f"{metrics['sell_depth']:.2f}" if metrics.get("sell_depth") else None
+                        f"{metrics['sell_depth']:.2f}"
+                        if metrics.get("sell_depth")
+                        else None
                     ),
                     "Total_Depth": (
-                        f"{metrics['total_depth']:.2f}" if metrics.get("total_depth") else None
+                        f"{metrics['total_depth']:.2f}"
+                        if metrics.get("total_depth")
+                        else None
                     ),
                     "Bid_Volume": (
-                        f"{metrics['bid_volume']:.8f}" if metrics.get("bid_volume") else None
+                        f"{metrics['bid_volume']:.8f}"
+                        if metrics.get("bid_volume")
+                        else None
                     ),
                     "Ask_Volume": (
-                        f"{metrics['ask_volume']:.8f}" if metrics.get("ask_volume") else None
+                        f"{metrics['ask_volume']:.8f}"
+                        if metrics.get("ask_volume")
+                        else None
                     ),
                     "Bid_Value": (
-                        f"{metrics['bid_value']:.2f}" if metrics.get("bid_value") else None
+                        f"{metrics['bid_value']:.2f}"
+                        if metrics.get("bid_value")
+                        else None
                     ),
                     "Ask_Value": (
-                        f"{metrics['ask_value']:.2f}" if metrics.get("ask_value") else None
+                        f"{metrics['ask_value']:.2f}"
+                        if metrics.get("ask_value")
+                        else None
                     ),
                     "Order_Book_Imbalance": (
                         f"{metrics['order_book_imbalance']:.2f}"
@@ -233,10 +259,14 @@ def append_to_order_book_metrics_csv(metrics_list):
                         else None
                     ),
                     "VWAP_Bid": (
-                        f"{metrics['vwap_bid']:.2f}" if metrics.get("vwap_bid") else None
+                        f"{metrics['vwap_bid']:.2f}"
+                        if metrics.get("vwap_bid")
+                        else None
                     ),
                     "VWAP_Ask": (
-                        f"{metrics['vwap_ask']:.2f}" if metrics.get("vwap_ask") else None
+                        f"{metrics['vwap_ask']:.2f}"
+                        if metrics.get("vwap_ask")
+                        else None
                     ),
                     "Slippage_Buy": (
                         f"{metrics['slippage_buy']:.2f}"

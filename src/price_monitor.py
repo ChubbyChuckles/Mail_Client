@@ -7,26 +7,20 @@ import numpy as np
 import pandas as pd
 from ccxt.base.errors import PermissionDenied
 
-from .config import (
-    ADJUSTED_PROFIT_TARGET,
-    ASSET_THRESHOLD,
-    CAT_LOSS_THRESHOLD,
-    CONCURRENT_REQUESTS,
-    INACTIVITY_TIMEOUT,
-    MIN_HOLDING_MINUTES,
-    MOMENTUM_CONFIRM_MINUTES,
-    MOMENTUM_THRESHOLD,
-    PROFIT_TARGET_MULTIPLIER,
-    RATE_LIMIT_WEIGHT,
-    TIME_STOP_MINUTES,
-    TRAILING_STOP_FACTOR,
-    TRAILING_STOP_FACTOR_EARLY,
-    logger,
-)
-from .exchange import bitvavo, check_rate_limit, handle_ban_error, semaphore, wait_until_ban_lifted
+from .config import (ADJUSTED_PROFIT_TARGET, ASSET_THRESHOLD,
+                     CAT_LOSS_THRESHOLD, CONCURRENT_REQUESTS,
+                     INACTIVITY_TIMEOUT, MIN_HOLDING_MINUTES,
+                     MOMENTUM_CONFIRM_MINUTES, MOMENTUM_THRESHOLD,
+                     PROFIT_TARGET_MULTIPLIER, RATE_LIMIT_WEIGHT,
+                     TIME_STOP_MINUTES, TRAILING_STOP_FACTOR,
+                     TRAILING_STOP_FACTOR_EARLY, logger)
+from .exchange import (bitvavo, check_rate_limit, handle_ban_error, semaphore,
+                       wait_until_ban_lifted)
 from .portfolio import sell_asset
-from .state import ban_expiry_time, is_banned, low_volatility_assets, negative_momentum_counts, weight_used
+from .state import (ban_expiry_time, is_banned, low_volatility_assets,
+                    negative_momentum_counts, weight_used)
 from .utils import calculate_dynamic_ema_period, calculate_ema
+
 
 class PriceMonitorManager:
     def __init__(self):
@@ -79,8 +73,12 @@ class PriceMonitorManager:
                     with semaphore:
                         ticker = self.exchange.fetch_ticker(symbol)
                         if not isinstance(ticker, dict) or "last" not in ticker:
-                            logger.error(f"Invalid ticker response for {symbol}: {ticker}")
-                            self.ticker_errors[symbol] = self.ticker_errors.get(symbol, 0) + 1
+                            logger.error(
+                                f"Invalid ticker response for {symbol}: {ticker}"
+                            )
+                            self.ticker_errors[symbol] = (
+                                self.ticker_errors.get(symbol, 0) + 1
+                            )
                             if self.ticker_errors[symbol] >= 3:
                                 logger.warning(
                                     f"{symbol} has {self.ticker_errors[symbol]} ticker errors. Marking as low volatility."
@@ -103,12 +101,21 @@ class PriceMonitorManager:
                                 if symbol in portfolio["assets"]:
                                     portfolio["assets"][symbol]["current_price"] = price
                                     portfolio["assets"][symbol]["highest_price"] = max(
-                                        portfolio["assets"][symbol]["highest_price"], price
+                                        portfolio["assets"][symbol]["highest_price"],
+                                        price,
                                     )
-                        if last_candle_time is None or current_second > last_candle_time:
+                        if (
+                            last_candle_time is None
+                            or current_second > last_candle_time
+                        ):
                             if candles:
                                 self.evaluate_candle(
-                                    candles[-1], symbol, portfolio, portfolio_lock, candles, candles_df
+                                    candles[-1],
+                                    symbol,
+                                    portfolio,
+                                    portfolio_lock,
+                                    candles,
+                                    candles_df,
                                 )
                             candles.append(
                                 {
@@ -126,7 +133,8 @@ class PriceMonitorManager:
                             candles[-1]["low"] = min(candles[-1]["low"], price)
                             candles[-1]["close"] = price
                         candles = [
-                            c for c in candles
+                            c
+                            for c in candles
                             if (current_time - c["timestamp"]).total_seconds() <= 5
                         ]
                         if time.time() - self.last_update[symbol] > INACTIVITY_TIMEOUT:
@@ -323,6 +331,7 @@ class PriceMonitorManager:
                 )
                 if finished_trade:
                     from .utils import append_to_finished_trades_csv
+
                     append_to_finished_trades_csv(finished_trade)
 
     def start(self, symbol, portfolio, portfolio_lock, candles_df):
@@ -343,9 +352,7 @@ class PriceMonitorManager:
                         f"Max threads ({CONCURRENT_REQUESTS}) reached. Cannot start monitoring for {symbol}."
                     )
                     return
-                if (
-                    weight_used + 2 > RATE_LIMIT_WEIGHT * 0.8
-                ):
+                if weight_used + 2 > RATE_LIMIT_WEIGHT * 0.8:
                     logger.warning(
                         f"Approaching rate limit ({weight_used}). Delaying monitoring for {symbol}."
                     )

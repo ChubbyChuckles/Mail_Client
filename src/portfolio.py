@@ -8,30 +8,21 @@ from datetime import datetime, timedelta
 import numpy as np
 import pandas as pd
 
-from .config import (
-    ADJUSTED_PROFIT_TARGET,
-    ALLOCATION_PER_TRADE,
-    ASSET_THRESHOLD,
-    BUY_FEE,
-    CAT_LOSS_THRESHOLD,
-    FINISHED_TRADES_CSV,
-    MAX_ACTIVE_ASSETS,
-    MIN_HOLDING_MINUTES,
-    MOMENTUM_CONFIRM_MINUTES,
-    MOMENTUM_THRESHOLD,
-    PORTFOLIO_FILE,
-    PORTFOLIO_VALUE,
-    PROFIT_TARGET,
-    PROFIT_TARGET_MULTIPLIER,
-    SELL_FEE,
-    TIME_STOP_MINUTES,
-    TRAILING_STOP_FACTOR,
-    TRAILING_STOP_FACTOR_EARLY,
-    logger,
-)
+from .config import (ADJUSTED_PROFIT_TARGET, ALLOCATION_PER_TRADE,
+                     ASSET_THRESHOLD, BUY_FEE, CAT_LOSS_THRESHOLD,
+                     FINISHED_TRADES_CSV, MAX_ACTIVE_ASSETS,
+                     MIN_HOLDING_MINUTES, MOMENTUM_CONFIRM_MINUTES,
+                     MOMENTUM_THRESHOLD, PORTFOLIO_FILE, PORTFOLIO_VALUE,
+                     PROFIT_TARGET, PROFIT_TARGET_MULTIPLIER, SELL_FEE,
+                     TIME_STOP_MINUTES, TRAILING_STOP_FACTOR,
+                     TRAILING_STOP_FACTOR_EARLY, logger)
 from .exchange import fetch_ticker_price, fetch_trade_details
-from .state import low_volatility_assets, negative_momentum_counts, portfolio, portfolio_lock
-from .utils import append_to_buy_trades_csv, calculate_dynamic_ema_period, calculate_ema, append_to_finished_trades_csv, append_to_order_book_metrics_csv
+from .state import (low_volatility_assets, negative_momentum_counts, portfolio,
+                    portfolio_lock)
+from .utils import (append_to_buy_trades_csv, append_to_finished_trades_csv,
+                    append_to_order_book_metrics_csv,
+                    calculate_dynamic_ema_period, calculate_ema)
+
 
 def sell_asset(
     symbol,
@@ -86,13 +77,15 @@ def sell_asset(
             low_volatility_assets.discard(symbol)
             negative_momentum_counts.pop(symbol, None)
             logger.debug(f"Updated portfolio state for {symbol}")
-        
+
         # Move post-sale actions outside the lock
         try:
             if price_monitor_manager:
                 price_monitor_manager.stop(symbol)
             else:
-                logger.warning(f"Price monitor manager is None for {symbol}. Cannot stop monitoring.")
+                logger.warning(
+                    f"Price monitor manager is None for {symbol}. Cannot stop monitoring."
+                )
             append_to_finished_trades_csv(finished_trade)
         except Exception as e:
             logger.error(f"Failed to process post-sale actions for {symbol}: {e}")
@@ -101,8 +94,13 @@ def sell_asset(
         logger.error(f"Critical error in sell_asset for {symbol}: {e}")
         raise
 
+
 def sell_most_profitable_asset(
-    portfolio, portfolio_lock, percent_changes, finished_trades, price_monitor_manager=None
+    portfolio,
+    portfolio_lock,
+    percent_changes,
+    finished_trades,
+    price_monitor_manager=None,
 ):
     """
     Sells the most profitable asset to free up a portfolio slot.
@@ -161,6 +159,7 @@ def sell_most_profitable_asset(
             price_monitor_manager=price_monitor_manager,
         )
 
+
 def save_portfolio():
     """
     Saves the current portfolio state to a JSON file and maintains only the 3 latest backup files.
@@ -203,7 +202,13 @@ def save_portfolio():
     except Exception as e:
         logger.error(f"Error saving portfolio to {PORTFOLIO_FILE}: {e}", exc_info=True)
 
-def manage_portfolio(above_threshold_data, percent_changes, price_monitor_manager, order_book_metrics_list=None):
+
+def manage_portfolio(
+    above_threshold_data,
+    percent_changes,
+    price_monitor_manager,
+    order_book_metrics_list=None,
+):
     """
     Manages the portfolio by processing sell signals, updating assets, and buying new assets.
 
@@ -264,7 +269,11 @@ def manage_portfolio(above_threshold_data, percent_changes, price_monitor_manage
                 else:
                     finished_trades.append(
                         sell_most_profitable_asset(
-                            portfolio, portfolio_lock, percent_changes, finished_trades, price_monitor_manager=price_monitor_manager
+                            portfolio,
+                            portfolio_lock,
+                            percent_changes,
+                            finished_trades,
+                            price_monitor_manager=price_monitor_manager,
                         )
                     )
 
@@ -517,7 +526,11 @@ def manage_portfolio(above_threshold_data, percent_changes, price_monitor_manage
                     )
                     finished_trades.append(
                         sell_most_profitable_asset(
-                            portfolio, portfolio_lock, percent_changes, finished_trades, price_monitor_manager=price_monitor_manager
+                            portfolio,
+                            portfolio_lock,
+                            percent_changes,
+                            finished_trades,
+                            price_monitor_manager=price_monitor_manager,
                         )
                     )
                 elif symbol in portfolio["assets"]:

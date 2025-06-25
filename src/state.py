@@ -18,6 +18,7 @@ last_reset_time = time.time()
 is_banned = False
 ban_expiry_time = 0
 
+
 def load_portfolio():
     global portfolio
     try:
@@ -73,6 +74,7 @@ def load_portfolio():
             )
             portfolio = {"cash": PORTFOLIO_VALUE, "assets": {}}
 
+
 def save_state():
     try:
         state = {
@@ -87,6 +89,7 @@ def save_state():
     except Exception as e:
         logger.error(f"Error saving state: {e}", exc_info=True)
 
+
 def load_state():
     global low_volatility_assets, negative_momentum_counts, weight_used, last_reset_time
     try:
@@ -99,6 +102,7 @@ def load_state():
         logger.info("Loaded state from state.json")
     except Exception as e:
         logger.error(f"Error loading state: {e}", exc_info=True)
+
 
 # Call load_portfolio() at startup
 load_portfolio()
