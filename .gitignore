@@ -14,3 +14,6 @@ creds.json
 state.json
 assets_bought/
 assets_sold/
+finished_trades.csv
+order_book_metrics.csv
+order_book_snapshots

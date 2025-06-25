@@ -31,7 +31,7 @@ from .config import (
 )
 from .exchange import fetch_ticker_price, fetch_trade_details
 from .state import low_volatility_assets, negative_momentum_counts, portfolio, portfolio_lock
-from .utils import append_to_buy_trades_csv, calculate_dynamic_ema_period, calculate_ema, append_to_finished_trades_csv
+from .utils import append_to_buy_trades_csv, calculate_dynamic_ema_period, calculate_ema, append_to_finished_trades_csv, append_to_order_book_metrics_csv
 
 def sell_asset(
     symbol,
@@ -203,7 +203,7 @@ def save_portfolio():
     except Exception as e:
         logger.error(f"Error saving portfolio to {PORTFOLIO_FILE}: {e}", exc_info=True)
 
-def manage_portfolio(above_threshold_data, percent_changes, price_monitor_manager):
+def manage_portfolio(above_threshold_data, percent_changes, price_monitor_manager, order_book_metrics_list=None):
     """
     Manages the portfolio by processing sell signals, updating assets, and buying new assets.
 
@@ -211,7 +211,11 @@ def manage_portfolio(above_threshold_data, percent_changes, price_monitor_manage
         above_threshold_data (list): List of assets meeting price/volume thresholds.
         percent_changes (pandas.DataFrame): DataFrame with price changes and OHLCV data.
         price_monitor_manager: Instance of PriceMonitorManager.
+        order_book_metrics_list (list): List of order book metrics to update with buy decisions.
     """
+    if order_book_metrics_list is None:
+        order_book_metrics_list = []
+
     current_time = datetime.utcnow()
     five_min_ago = current_time - timedelta(minutes=5)
     logger.info(
@@ -456,7 +460,7 @@ def manage_portfolio(above_threshold_data, percent_changes, price_monitor_manage
                         )
                     )
 
-            # Buy new assets
+            # Buy new assets and update order book metrics
             for record in above_threshold_data:
                 symbol = record["symbol"]
                 if (
@@ -500,6 +504,10 @@ def manage_portfolio(above_threshold_data, percent_changes, price_monitor_manage
                         f"Bought {quantity:.4f} {symbol} at {purchase_price:.4f} EUR for {net_allocation:.2f} EUR (after {buy_fee:.2f} fee), "
                         f"Trade Count: {trade_count}, Largest Trade Volume: €{largest_trade_volume_eur:.2f}"
                     )
+                    # Mark as bought in order_book_metrics_list
+                    for metrics in order_book_metrics_list:
+                        if metrics.get("market") == symbol.replace("/", "-"):
+                            metrics["bought"] = True
                     price_monitor_manager.start(
                         symbol, portfolio, portfolio_lock, percent_changes
                     )
@@ -523,6 +531,10 @@ def manage_portfolio(above_threshold_data, percent_changes, price_monitor_manage
 
     except Exception as e:
         logger.error(f"Error in portfolio management: {e}", exc_info=True)
+
+    # Save order book metrics to CSV
+    if order_book_metrics_list:
+        append_to_order_book_metrics_csv(order_book_metrics_list)
 
     total_portfolio_value = portfolio["cash"] + total_asset_value
     if skipped_assets:
