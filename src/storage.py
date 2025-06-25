@@ -1,14 +1,15 @@
 # trading_bot/src/storage.py
+import json
 import os
 from datetime import datetime
 
 import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
-import json
 
 from .config import PORTFOLIO_FILE, RESULTS_FOLDER, logger
 from .state import portfolio, portfolio_lock
+
 
 def save_to_local(df, output_path):
     """
@@ -35,6 +36,7 @@ def save_to_local(df, output_path):
         logger.info(f"Saved {len(df)} records to {output_path}")
     except Exception as e:
         logger.error(f"Error saving to {output_path}: {e}", exc_info=True)
+
 
 def save_portfolio():
     """

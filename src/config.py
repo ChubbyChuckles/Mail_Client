@@ -30,12 +30,14 @@ logger.setLevel(logging.INFO)
 logger.addHandler(console_handler)
 logger.addHandler(file_handler)
 
+
 # Custom handler for evaluation logs
 class EvaluationLogHandler(logging.Handler):
     def emit(self, record):
         if record.levelno == logging.INFO and "Evaluation Decision" in record.msg:
             with open(log_filename, "a", encoding="utf-8") as f:
                 f.write(f"{record.asctime} [INFO] {record.msg}\n")
+
 
 evaluation_handler = EvaluationLogHandler()
 evaluation_handler.setFormatter(log_formatter)
@@ -48,15 +50,17 @@ sys.stdout = os.fdopen(sys.stdout.fileno(), "w", buffering=1)
 # Load environment variables
 load_dotenv()
 
+
 # Configuration variables from .env
 def parse_float_env(var_name, default):
     value = os.getenv(var_name, str(default))
     # Extract numeric part before any comment or whitespace
     try:
-        return float(value.split('#')[0].strip())
+        return float(value.split("#")[0].strip())
     except ValueError as e:
         logger.error(f"Invalid value for {var_name}: {value}. Using default: {default}")
         return float(default)
+
 
 # Configuration variables from .env
 API_KEY = os.getenv("BITVAVO_API_KEY")
@@ -94,7 +98,9 @@ BUY_TRADES_CSV = os.getenv("BUY_TRADES_CSV", "buy_trades.csv")
 FINISHED_TRADES_CSV = os.getenv("FINISHED_TRADES_CSV", "finished_trades.csv")
 ORDER_BOOK_METRICS_CSV = os.getenv("ORDER_BOOK_METRICS_CSV", "order_book_metrics.csv")
 AMOUNT_QUOTE = parse_float_env("AMOUNT_QUOTE", 5.5)  # EUR amount for slippage
-PRICE_RANGE_PERCENT = parse_float_env("PRICE_RANGE_PERCENT", 10.0)  # Price range for depth
+PRICE_RANGE_PERCENT = parse_float_env(
+    "PRICE_RANGE_PERCENT", 10.0
+)  # Price range for depth
 
 # Validate MAX_ACTIVE_ASSETS
 if MAX_ACTIVE_ASSETS < 1:
@@ -109,4 +115,3 @@ if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
     logger.warning(
         "TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID missing. Telegram notifications disabled."
     )
-

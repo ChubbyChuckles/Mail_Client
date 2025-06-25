@@ -1,20 +1,25 @@
 # MAIL_CLIENT_TEST/tests/test_storage.py
-import pytest
-import pandas as pd
-from unittest.mock import patch, mock_open
 import os
+from unittest.mock import mock_open, patch
 
-from src.storage import save_to_local, save_portfolio
+import pandas as pd
+import pytest
+
 from src.state import portfolio, portfolio_lock
+from src.storage import save_portfolio, save_to_local
+
 
 @pytest.fixture
 def sample_df():
     """Create a sample DataFrame."""
-    return pd.DataFrame({
-        "timestamp": [pd.Timestamp("2021-06-30")],
-        "symbol": ["BTC/EUR"],
-        "close": [50000.0]
-    })
+    return pd.DataFrame(
+        {
+            "timestamp": [pd.Timestamp("2021-06-30")],
+            "symbol": ["BTC/EUR"],
+            "close": [50000.0],
+        }
+    )
+
 
 def test_save_to_local_new_file(tmp_path, sample_df):
     """Test saving DataFrame to a new Parquet file."""
@@ -25,18 +30,22 @@ def test_save_to_local_new_file(tmp_path, sample_df):
     assert len(saved_df) == 1
     assert saved_df["symbol"].iloc[0] == "BTC/EUR"
 
+
 def test_save_to_local_append(tmp_path, sample_df):
     """Test appending to an existing Parquet file."""
     output_path = tmp_path / "data/test.parquet"
     save_to_local(sample_df, str(output_path))
-    new_df = pd.DataFrame({
-        "timestamp": [pd.Timestamp("2021-07-01")],
-        "symbol": ["BTC/EUR"],
-        "close": [51000.0]
-    })
+    new_df = pd.DataFrame(
+        {
+            "timestamp": [pd.Timestamp("2021-07-01")],
+            "symbol": ["BTC/EUR"],
+            "close": [51000.0],
+        }
+    )
     save_to_local(new_df, str(output_path))
     saved_df = pd.read_parquet(output_path)
     assert len(saved_df) == 2
+
 
 def test_save_portfolio(tmp_path):
     """Test saving portfolio to JSON."""

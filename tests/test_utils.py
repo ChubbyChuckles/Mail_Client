@@ -1,14 +1,15 @@
 # MAIL_CLIENT_TEST/tests/test_utils.py
-import pytest
-import pandas as pd
-from unittest.mock import mock_open, patch
 import csv
 import logging
+from unittest.mock import mock_open, patch
 
-from src.utils import (
-    calculate_ema, calculate_dynamic_ema_period, append_to_buy_trades_csv, append_to_finished_trades_csv
-)
+import pandas as pd
+import pytest
+
 from src.config import logger
+from src.utils import (append_to_buy_trades_csv, append_to_finished_trades_csv,
+                       calculate_dynamic_ema_period, calculate_ema)
+
 
 def test_calculate_ema_valid():
     """Test EMA calculation with valid input."""
@@ -16,6 +17,7 @@ def test_calculate_ema_valid():
     ema = calculate_ema(prices, 3)
     assert isinstance(ema, float)
     assert 1020 < ema < 1040
+
 
 def test_calculate_ema_insufficient_data(caplog):
     """Test EMA with insufficient data."""
@@ -25,10 +27,12 @@ def test_calculate_ema_insufficient_data(caplog):
         assert ema is None
         assert "Insufficient data for EMA calculation" in caplog.text
 
+
 def test_calculate_dynamic_ema_period():
     """Test dynamic EMA period calculation."""
     period = calculate_dynamic_ema_period(30, 60, 15, 12)
     assert period == 8  # Base 5 + 3 for holding time
+
 
 def test_append_to_buy_trades_csv(tmp_path):
     """Test appending buy trade to CSV."""
@@ -38,7 +42,7 @@ def test_append_to_buy_trades_csv(tmp_path):
         "Buy Quantity": "0.1",
         "Buy Price": "50000.0",
         "Buy Time": "2021-06-30",
-        "Buy Fee": "7.5"
+        "Buy Fee": "7.5",
     }
     with patch("MAIL_CLIENT_TEST.src.config.BUY_TRADES_CSV", str(csv_file)):
         append_to_buy_trades_csv(trade_data)

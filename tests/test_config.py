@@ -1,17 +1,18 @@
 # MAIL_CLIENT_TEST/tests/test_config.py
-import os
 import logging
-from unittest.mock import patch, mock_open
-import pytest
-import sys
 import os
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+import sys
+from unittest.mock import mock_open, patch
 
-from src.config import (
-    API_KEY, API_SECRET, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID,
-    CONCURRENT_REQUESTS, RATE_LIMIT_WEIGHT, PORTFOLIO_VALUE,
-    MAX_ACTIVE_ASSETS, ASSET_THRESHOLD, logger, log_filename
-)
+import pytest
+
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+
+from src.config import (API_KEY, API_SECRET, ASSET_THRESHOLD,
+                        CONCURRENT_REQUESTS, MAX_ACTIVE_ASSETS,
+                        PORTFOLIO_VALUE, RATE_LIMIT_WEIGHT, TELEGRAM_BOT_TOKEN,
+                        TELEGRAM_CHAT_ID, log_filename, logger)
+
 
 @pytest.fixture(autouse=True)
 def setup_env(monkeypatch, tmp_path):
@@ -26,13 +27,14 @@ def setup_env(monkeypatch, tmp_path):
         "PORTFOLIO_VALUE": "10000",
         "MAX_ACTIVE_ASSETS": "20",
         "RESULTS_FOLDER": str(tmp_path / "data"),
-        "PARQUET_FILENAME": "test.parquet"
+        "PARQUET_FILENAME": "test.parquet",
     }
     for key, value in env_vars.items():
         monkeypatch.setenv(key, value)
     yield
     # Cleanup
     monkeypatch.delenv("BITVAVO_API_KEY", raising=False)
+
 
 def test_config_loading():
     """Test that environment variables are loaded correctly."""
@@ -45,6 +47,7 @@ def test_config_loading():
     assert PORTFOLIO_VALUE == 10000
     assert MAX_ACTIVE_ASSETS == 20
     assert ASSET_THRESHOLD == int(20 * 0.6)
+
 
 def test_logging_setup(tmp_path):
     """Test logging setup creates log file and handlers."""
