@@ -103,6 +103,8 @@ PRICE_RANGE_PERCENT = parse_float_env(
 )  # Price range for depth
 MAX_SLIPPAGE_BUY=float(os.getenv("MAX_SLIPPAGE_BUY", 0.05)) # Maximum slippage for buy orders
 MAX_SLIPPAGE_SELL=float(os.getenv("MAX_SLIPPAGE_SELL", -0.05)) # Maximum slippage for sell orders
+MIN_TOTAL_SCORE=float(os.getenv("MIN_TOTAL_SCORE", 0.7)) # Minimum total score for buy decisions
+
 
 # Validate MAX_ACTIVE_ASSETS
 if MAX_ACTIVE_ASSETS < 1:
