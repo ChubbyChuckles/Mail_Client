@@ -129,11 +129,11 @@ def main():
                 combined_df = pd.concat(all_data, ignore_index=True)
                 output_path = f"{RESULTS_FOLDER}/{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}_{PARQUET_FILENAME}"
                 save_to_local(combined_df, output_path)
-                above_threshold_data, percent_changes = verify_and_analyze_data(
+                above_threshold_data, percent_changes, order_book_metrics_list = verify_and_analyze_data(
                     combined_df, price_monitor_manager
                 )
                 manage_portfolio(
-                    above_threshold_data, percent_changes, price_monitor_manager
+                    above_threshold_data, percent_changes, price_monitor_manager, order_book_metrics_list
                 )
                 save_portfolio()
                 with portfolio_lock:

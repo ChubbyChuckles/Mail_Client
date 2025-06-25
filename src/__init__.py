@@ -28,8 +28,10 @@ from .state import (
 from .storage import save_to_local
 from .utils import (
     append_to_buy_trades_csv,
+    append_to_finished_trades_csv,  # Add this line
     calculate_dynamic_ema_period,
     calculate_ema,
+    append_to_order_book_metrics_csv,  # Add new function
 )
 
 __version__ = "0.1.0"  # Version of the trading bot package
@@ -64,6 +66,8 @@ __all__ = [
     "calculate_ema",
     "calculate_dynamic_ema_period",
     "append_to_buy_trades_csv",
+    "append_to_finished_trades_csv",  # Add this line
+    "append_to_order_book_metrics_csv"
     # Main
     "main",
 ]

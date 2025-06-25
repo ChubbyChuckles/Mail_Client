@@ -5,6 +5,9 @@ import pandas as pd
 
 from .config import MIN_VOLUME_EUR, PRICE_INCREASE_THRESHOLD, logger
 from .state import low_volatility_assets, portfolio, portfolio_lock
+from .config import AMOUNT_QUOTE, PRICE_RANGE_PERCENT
+from .exchange import check_rate_limit, semaphore
+from .bitvavo_order_metrics import calculate_order_book_metrics
 
 
 def verify_and_analyze_data(df, price_monitor_manager):
@@ -15,13 +18,14 @@ def verify_and_analyze_data(df, price_monitor_manager):
         df (pandas.DataFrame): DataFrame with OHLCV data and 'symbol' column.
 
     Returns:
-        tuple: (above_threshold_data, percent_changes)
+        tuple: (above_threshold_data, percent_changes, order_book_metrics_list)
             - above_threshold_data (list): List of dictionaries for assets meeting thresholds.
             - percent_changes (pandas.DataFrame): DataFrame with price changes and OHLCV data.
+            - order_book_metrics_list (list): List of order book metrics for relevant coins.
     """
     if df.empty:
         logger.warning("Input DataFrame is empty.")
-        return [], pd.DataFrame()
+        return [], pd.DataFrame(), []
 
     current_time = datetime.utcnow()
     ten_min_ago = current_time - timedelta(minutes=10)
@@ -29,12 +33,12 @@ def verify_and_analyze_data(df, price_monitor_manager):
 
     if df["timestamp"].max() < ten_min_ago:
         logger.warning("Data contains no candles from within the last 10 minutes.")
-        return [], pd.DataFrame()
+        return [], pd.DataFrame(), []
 
     recent_data = df[df["timestamp"] >= five_min_ago]
     if recent_data.empty:
         logger.warning("No recent data within the last 5 minutes.")
-        return [], pd.DataFrame()
+        return [], pd.DataFrame(), []
 
     grouped = recent_data.groupby("symbol")
     symbols = grouped.first()
@@ -58,6 +62,22 @@ def verify_and_analyze_data(df, price_monitor_manager):
         (percent_changes["percent_change"] >= PRICE_INCREASE_THRESHOLD)
         & (percent_changes["volume_eur"] >= MIN_VOLUME_EUR)
     ]
+
+    order_book_metrics_list = []
+
+    # Calculate order book metrics for coins above threshold
+    for _, row in above_threshold.iterrows():
+        symbol = row["symbol"]
+        logger.info(f"Calculating order book metrics for {symbol} (above threshold)")
+        with semaphore:
+            check_rate_limit(1)  # Assume order book fetch has weight of 2
+            metrics = calculate_order_book_metrics(
+                market=symbol.replace("/", "-"),
+                amount_quote=AMOUNT_QUOTE,
+                price_range_percent=PRICE_RANGE_PERCENT
+            )
+            metrics["bought"] = False  # Will be updated in portfolio.py if bought
+            order_book_metrics_list.append(metrics)
 
     if not above_threshold.empty:
         logger.info(
@@ -88,6 +108,18 @@ def verify_and_analyze_data(df, price_monitor_manager):
                 f"Open: {row['open_price']:.2f}, Close: {row['close_price']:.2f}, "
                 f"Volume: {row['volume_eur']:.2f} EUR, Timestamp: {row['latest_timestamp']}"
             )
+            # Calculate order book metrics for top 5 below threshold
+            symbol = row["symbol"]
+            logger.info(f"Calculating order book metrics for {symbol} (below threshold)")
+            with semaphore:
+                check_rate_limit(1)
+                metrics = calculate_order_book_metrics(
+                    market=symbol.replace("/", "-"),
+                    amount_quote=AMOUNT_QUOTE,
+                    price_range_percent=PRICE_RANGE_PERCENT
+                )
+                metrics["bought"] = False
+                order_book_metrics_list.append(metrics)
     else:
         logger.info(f"No coins with price increase < {PRICE_INCREASE_THRESHOLD}%")
 
@@ -104,4 +136,4 @@ def verify_and_analyze_data(df, price_monitor_manager):
                     low_volatility_assets.discard(symbol)
                     price_monitor_manager.start(symbol, portfolio, portfolio_lock, df)
 
-    return above_threshold.to_dict("records"), percent_changes
+    return above_threshold.to_dict("records"), percent_changes, order_book_metrics_list
