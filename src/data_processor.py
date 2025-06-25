@@ -9,7 +9,6 @@ from .config import AMOUNT_QUOTE, PRICE_RANGE_PERCENT
 from .exchange import check_rate_limit, semaphore
 from .bitvavo_order_metrics import calculate_order_book_metrics
 
-
 def verify_and_analyze_data(df, price_monitor_manager):
     """
     Verifies and analyzes OHLCV data to identify assets with significant price increases and volume.

@@ -5,6 +5,7 @@ __pycache__/
 *.json
 *.parquet
 *.bat
+*.png
 *.json.backup*
 .venv/
 data_1m_pq_alot/

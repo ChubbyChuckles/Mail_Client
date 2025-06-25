@@ -3,7 +3,7 @@ from urllib.parse import urlencode
 import requests
 from python_bitvavo_api.bitvavo import Bitvavo
 from src.config import API_KEY, API_SECRET  # Replace with your config or use env variables
-
+from .order_book_buy_score import analyze_buy_decision
 
 
 # Initialize Bitvavo client
@@ -18,26 +18,6 @@ bitvavo = Bitvavo(
 
 # Base URL for direct REST API calls
 BASE_URL = "https://api.bitvavo.com/v2"
-
-# def get_rate_limit_remaining(endpoint="/time", params=None):
-#     """Fetch the remaining rate limit weight using a direct REST call."""
-#     try:
-#         url = f"{BASE_URL}{endpoint}"
-#         if params:
-#             url += "?" + urlencode(params)
-
-#         logger.debug(f"Making unauthenticated request to {url}")
-#         response = requests.get(url)
-#         response.raise_for_status()
-#         remaining = int(response.headers.get("bitvavo-ratelimit-remaining", -1))
-#         logger.info(f"Rate limit remaining for {endpoint}: {remaining}")
-#         return remaining
-#     except Exception as e:
-#         logger.error(f"Error fetching rate limit for {endpoint}: {e}")
-#         if endpoint == "/time":
-#             logger.info("Falling back to /markets endpoint")
-#             return get_rate_limit_remaining(endpoint="/markets")
-#         return None
 
 def calculate_order_book_metrics(market, amount_quote=5.5, price_range_percent=10.0):
     """
@@ -54,8 +34,8 @@ def calculate_order_book_metrics(market, amount_quote=5.5, price_range_percent=1
     try:
         
         
-        # Fetch order book with depth=100
-        order_book = bitvavo.book(market, {'depth': 100})
+        # Fetch order book with depth=1000
+        order_book = bitvavo.book(market, {'depth': 1000})
         if not order_book.get('bids') or not order_book.get('asks'):
             return {'error': 'Failed to retrieve order book'}
         
@@ -171,31 +151,6 @@ def calculate_order_book_metrics(market, amount_quote=5.5, price_range_percent=1
                 slippage_percent = ((predicted_price - expected_price) / expected_price) * 100
                 metrics[f'slippage_{side}'] = slippage_percent
                 metrics[f'predicted_price_{side}'] = predicted_price
-        
-        # Log all metrics
-        # logger.info(f"Market: {metrics['market']}, Nonce: {metrics['nonce']}")
-        # logger.info(f"Best Bid: {metrics['best_bid']:.2f} EUR")
-        # logger.info(f"Best Ask: {metrics['best_ask']:.2f} EUR")
-        # logger.info(f"Spread: {metrics['spread']:.2f} EUR ({metrics['spread_percentage']:.2f}%)")
-        # logger.info(f"Mid Price: {metrics['mid_price']:.2f} EUR")
-        # logger.info(f"Buy Depth (±{price_range_percent}%): {metrics['buy_depth']:.2f} EUR")
-        # logger.info(f"Sell Depth (±{price_range_percent}%): {metrics['sell_depth']:.2f} EUR")
-        # logger.info(f"Total Depth: {metrics['total_depth']:.2f} EUR")
-        # logger.info(f"Bid Volume: {metrics['bid_volume']:.8f} {market.split('-')[0]}")
-        # logger.info(f"Ask Volume: {metrics['ask_volume']:.8f} {market.split('-')[0]}")
-        # logger.info(f"Bid Value: {metrics['bid_value']:.2f} EUR")
-        # logger.info(f"Ask Value: {metrics['ask_value']:.2f} EUR")
-        # logger.info(f"Order Book Imbalance: {metrics['order_book_imbalance']:.2f} (buy pressure)")
-        # logger.info(f"Bid Levels Count: {metrics['bid_levels_count']}")
-        # logger.info(f"Ask Levels Count: {metrics['ask_levels_count']}")
-        # logger.info(f"Average Bid Price: {metrics['avg_bid_price']:.2f} EUR")
-        # logger.info(f"Average Ask Price: {metrics['avg_ask_price']:.2f} EUR")
-        # logger.info(f"VWAP Bid: {metrics['vwap_bid']:.2f} EUR")
-        # logger.info(f"VWAP Ask: {metrics['vwap_ask']:.2f} EUR")
-        # logger.info(f"Slippage Buy ({amount_quote} EUR): {metrics['slippage_buy']:.2f}%")
-        # logger.info(f"Predicted Buy Price: {metrics['predicted_price_buy']:.2f} EUR")
-        # logger.info(f"Slippage Sell ({amount_quote} EUR): {metrics['slippage_sell']:.2f}%")
-        # logger.info(f"Predicted Sell Price: {metrics['predicted_price_sell']:.2f} EUR")
         
         return metrics
     
