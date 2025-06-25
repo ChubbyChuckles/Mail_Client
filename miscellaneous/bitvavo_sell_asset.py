@@ -135,11 +135,11 @@ def sell_crypto_asset(symbol, amount_quote):
             # Write response to JSON file
             with open(file_path, 'w') as json_file:
                 json.dump(response, json_file, indent=4)
-            logger.info(f"Sold order response saved to: {file_path}")
+            logger.info(f"Sell order response saved to: {file_path}")
         except Exception as e:
             logger.error(f"Error saving JSON file: {str(e)}")
         
-        logger.info(f"Sold order placed successfully: {response['orderId']}")
+        logger.info(f"Sell order placed successfully: {response['orderId']}")
         return response
         
     except Exception as e:
