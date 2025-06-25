@@ -4,11 +4,48 @@ from datetime import datetime, timedelta
 import pandas as pd
 
 from .bitvavo_order_metrics import calculate_order_book_metrics
-from .config import (AMOUNT_QUOTE, MIN_VOLUME_EUR, PRICE_INCREASE_THRESHOLD,
+from .config import (AMOUNT_QUOTE, MIN_VOLUME_EUR, PRICE_INCREASE_THRESHOLD, MAX_SLIPPAGE_BUY, MAX_SLIPPAGE_SELL,
                      PRICE_RANGE_PERCENT, logger)
 from .exchange import check_rate_limit, semaphore
 from .state import low_volatility_assets, portfolio, portfolio_lock
 
+# Define ANSI color codes
+GREEN = "\033[32m"
+RED = "\033[31m"
+YELLOW = "\033[33m"
+RESET = "\033[0m"  # Resets color to default
+
+def colorize_value(value, column):
+    if column in ["slippage_buy"]:
+        if abs(value) < MAX_SLIPPAGE_BUY:
+            return f"{GREEN}{value:>7.3f}%{RESET}"
+        else:
+            return f"{RED}{value:>7.3f}%{RESET}"
+    elif column in ["slippage_sell"]:
+        if value > MAX_SLIPPAGE_SELL:
+            return f"{GREEN}{value:>7.3f}%{RESET}"
+        else:
+            return f"{RED}{value:>7.3f}%{RESET}"
+    elif column in ["percent_change"]:
+        if value > PRICE_INCREASE_THRESHOLD:
+            return f"{GREEN}{value:>6.3f}%{RESET}"
+        else:
+            return f"{RED}{value:>6.3f}%{RESET}"
+    elif column in ["volume_eur"]:
+        if value > MIN_VOLUME_EUR:
+            return f"{GREEN}{value:>10.2f}€{RESET}"
+        else:
+            return f"{RED}{value:>10.2f}€{RESET}"
+    elif column == "recommendation":
+        if value == "Strong Buy":
+            return f"{GREEN}{value:<10}{RESET}"
+        elif value == "No Buy":
+            return f"{RED}{value:<10}{RESET}"
+        return f"{value:<10}"  # Default for other recommendations
+    elif column == "symbol":
+        return f"{YELLOW}{value:<12}{RESET}"
+    
+    return value  # Default case for uncolored columns
 
 def verify_and_analyze_data(df, price_monitor_manager):
     """
@@ -86,15 +123,15 @@ def verify_and_analyze_data(df, price_monitor_manager):
         for _, row in above_threshold.iterrows():
 
             logger.info(
-                f"Symbol: {row['symbol']:<12}  "
-                f"Change: {row['percent_change']:>6.3f}%  "
-                f"Volume: {row['volume_eur']:>10.2f}€  "
+                f"Symbol: {colorize_value(row['symbol'], 'symbol')}  "
+                f"Change: {colorize_value(row['percent_change'], 'percent_change')}  "
+                f"Volume: {colorize_value(row['volume_eur'], 'volume_eur')}  "
                 f"Open: {row['open_price']:>12.8f}  "
                 f"Close: {row['close_price']:>12.8f}  "
-                f"Slippage Buy: {metrics['slippage_buy']:>7.3f}%  "
-                f"Slippage Sell: {metrics['slippage_sell']:>7.3f}%  "
+                f"Slippage Buy: {colorize_value(metrics['slippage_buy'], 'slippage_buy')}  "
+                f"Slippage Sell: {colorize_value(metrics['slippage_sell'], 'slippage_sell')}  "
                 f"Total Score: {metrics['total_score']:>4.2f}  "
-                f"Recommendation: {metrics['recommendation']:<10}  "
+                f"Recommendation: {colorize_value(metrics['recommendation'], 'recommendation')}  "
                 f"Latest Timestamp: {row['latest_timestamp']}"
             )
 
@@ -127,15 +164,15 @@ def verify_and_analyze_data(df, price_monitor_manager):
                 order_book_metrics_list.append(metrics)
 
             logger.info(
-                f"Symbol: {row['symbol']:<12}  "
-                f"Change: {row['percent_change']:>6.3f}%  "
-                f"Volume: {row['volume_eur']:>10.2f}€  "
+                f"Symbol: {colorize_value(row['symbol'], 'symbol')}  "
+                f"Change: {colorize_value(row['percent_change'], 'percent_change')}  "
+                f"Volume: {colorize_value(row['volume_eur'], 'volume_eur')}  "
                 f"Open: {row['open_price']:>12.8f}  "
                 f"Close: {row['close_price']:>12.8f}  "
-                f"Slippage Buy: {metrics['slippage_buy']:>7.3f}%  "
-                f"Slippage Sell: {metrics['slippage_sell']:>7.3f}%  "
+                f"Slippage Buy: {colorize_value(metrics['slippage_buy'], 'slippage_buy')}  "
+                f"Slippage Sell: {colorize_value(metrics['slippage_sell'], 'slippage_sell')}  "
                 f"Total Score: {metrics['total_score']:>4.2f}  "
-                f"Recommendation: {metrics['recommendation']:<10}  "
+                f"Recommendation: {colorize_value(metrics['recommendation'], 'recommendation')}  "
                 f"Latest Timestamp: {row['latest_timestamp']}"
             )
     else:
