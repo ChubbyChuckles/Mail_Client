@@ -273,7 +273,7 @@ def analyze_buy_decision(json_file, symbol):
 def main():
     # Example inputs (replace with your actual file and symbol)
     json_file = "F:\Order_Book_Data/combined_snapshots_20250625_174942.json"
-    symbol = "ETH/EUR"
+    symbol = "PEPE/EUR"
     
     logger.info(f"Starting buy decision analysis for {symbol} in {json_file}")
     analyze_buy_decision(json_file, symbol)
