@@ -33,7 +33,7 @@ def save_to_local(df, output_path):
             combined_df = df
         table = pa.Table.from_pandas(combined_df)
         pq.write_table(table, output_path)
-        logger.info(f"Saved {len(df)} records to {output_path}")
+        # logger.info(f"Saved {len(df)} records to {output_path}")
     except Exception as e:
         logger.error(f"Error saving to {output_path}: {e}", exc_info=True)
 

@@ -85,7 +85,7 @@ def save_state():
         }
         with open("state.json", "w") as f:
             json.dump(state, f, indent=4)
-        logger.info("Saved state to state.json")
+        # logger.info("Saved state to state.json")
     except Exception as e:
         logger.error(f"Error saving state: {e}", exc_info=True)
 

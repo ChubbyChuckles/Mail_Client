@@ -5,6 +5,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FutureTimeoutError
 from datetime import datetime, timedelta
+import os
 
 import pandas as pd
 
@@ -17,6 +18,8 @@ from .price_monitor import PriceMonitorManager
 from .state import (ban_expiry_time, is_banned, low_volatility_assets,
                     portfolio, portfolio_lock)
 from .storage import save_to_local
+from miscellaneous.print_assets import print_portfolio
+from miscellaneous.clean_up import garbage_collection
 
 last_cycle_time = time.time()
 
@@ -53,6 +56,8 @@ def main():
     watchdog_thread.start()
 
     try:
+        garbage_collection()
+        logger.info("Cleaning up old files...")
         markets = bitvavo.load_markets()
         eur_pairs = [
             symbol
@@ -60,6 +65,7 @@ def main():
             if symbol.endswith("/EUR") and markets[symbol].get("active", False)
         ]
         logger.info(f"Loaded {len(markets)} markets, {len(eur_pairs)} active EUR pairs")
+        
 
         while True:
             global last_cycle_time
@@ -99,6 +105,8 @@ def main():
             logger.info(
                 f"Active monitors: {active_monitors}, Adjusted concurrency: {adjusted_concurrency}"
             )
+
+            
 
             with ThreadPoolExecutor(max_workers=adjusted_concurrency) as executor:
                 logger.debug(
@@ -144,13 +152,25 @@ def main():
                         asset["quantity"] * asset["current_price"]
                         for asset in portfolio["assets"].values()
                     )
+
+                    # Define ANSI color code for bright blue
+                    BRIGHT_BLUE = "\033[94m"
+                    RESET = "\033[0m"  # Resets color to default
                     logger.info(
-                        f"Portfolio Status: Cash: {portfolio['cash']:.2f} EUR, "
+                        f"{BRIGHT_BLUE}PORTFOLIO STATUS: Cash: {portfolio['cash']:.2f} EUR, "
                         f"Assets: {len(portfolio['assets'])}, "
-                        f"Total Value: {total_value:.2f} EUR"
+                        f"Total Value: {total_value:.2f} EUR{RESET}"
                     )
-            else:
-                logger.warning("No data collected in this cycle.")
+                try:
+                    if not os.path.exists("portfolio.json"):
+                        raise FileNotFoundError("Portfolio file 'portfolio.json' does not exist")
+                    print_portfolio("portfolio.json")
+                except FileNotFoundError as e:
+                    print(f"Error: {e}")
+                except Exception as e:
+                    print(f"Unexpected error: {str(e)}")
+                else:
+                    logger.warning("No data collected in this cycle.")
 
             try:
                 with portfolio_lock:
