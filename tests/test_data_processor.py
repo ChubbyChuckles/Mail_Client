@@ -108,7 +108,7 @@ def test_old_data(mock_logger):
     mock_logger.warning.assert_called_with("Data contains no candles from within the last 10 minutes.")
 
 def test_no_recent_data(mock_logger):
-    """Test handling of data with no candles within the last 5 minutes."""
+    """Test handling of data with no candles within the last 10 minutes."""
     ten_min_ago = datetime.utcnow() - timedelta(minutes=10)
     df = pd.DataFrame({
         "timestamp": [ten_min_ago],
@@ -123,7 +123,7 @@ def test_no_recent_data(mock_logger):
     assert result[0] == []
     assert result[1].empty
     assert result[2] == []
-    mock_logger.warning.assert_called_with("No recent data within the last 5 minutes.")
+    mock_logger.warning.assert_called_with("Data contains no candles from within the last 10 minutes.")
 
 def test_invalid_data_handling():
     """Test handling of invalid data (e.g., zero open price)."""

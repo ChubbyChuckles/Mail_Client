@@ -36,7 +36,8 @@ class EvaluationLogHandler(logging.Handler):
     def emit(self, record):
         if record.levelno == logging.INFO and "Evaluation Decision" in record.msg:
             with open(log_filename, "a", encoding="utf-8") as f:
-                f.write(f"{record.asctime} [INFO] {record.msg}\n")
+                formatted_message = self.format(record)  # Use formatter to process record
+                f.write(f"{formatted_message}\n")
 
 
 evaluation_handler = EvaluationLogHandler()
