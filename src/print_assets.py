@@ -1,7 +1,7 @@
 import json
 import logging
 from typing import Dict, Any
-from src.config import logger
+from .config import (logger)
 
 # Define ANSI color codes
 GREEN = "\033[32m"

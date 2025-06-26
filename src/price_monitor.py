@@ -7,13 +7,8 @@ import numpy as np
 import pandas as pd
 from ccxt.base.errors import PermissionDenied
 
-from .config import (ADJUSTED_PROFIT_TARGET, ASSET_THRESHOLD,
-                     CAT_LOSS_THRESHOLD, CONCURRENT_REQUESTS,
-                     INACTIVITY_TIMEOUT, MIN_HOLDING_MINUTES,
-                     MOMENTUM_CONFIRM_MINUTES, MOMENTUM_THRESHOLD,
-                     PROFIT_TARGET_MULTIPLIER, RATE_LIMIT_WEIGHT,
-                     TIME_STOP_MINUTES, TRAILING_STOP_FACTOR,
-                     TRAILING_STOP_FACTOR_EARLY, logger)
+from . import config
+from . config import (logger)
 from .exchange import (bitvavo, check_rate_limit, handle_ban_error, semaphore,
                        wait_until_ban_lifted)
 from .portfolio import sell_asset
@@ -34,8 +29,7 @@ class PriceMonitorManager:
 
     def adjust_concurrency(self, max_threads):
         with threading.Lock():
-            global CONCURRENT_REQUESTS
-            CONCURRENT_REQUESTS = max_threads
+            config.config.CONCURRENT_REQUESTS = max_threads
             current_threads = len(self.threads)
             if current_threads > max_threads:
                 threads_to_stop = sorted(
@@ -137,9 +131,9 @@ class PriceMonitorManager:
                             for c in candles
                             if (current_time - c["timestamp"]).total_seconds() <= 5
                         ]
-                        if time.time() - self.last_update[symbol] > INACTIVITY_TIMEOUT:
+                        if time.time() - self.last_update[symbol] > config.config.INACTIVITY_TIMEOUT:
                             logger.info(
-                                f"{symbol} inactive for {INACTIVITY_TIMEOUT} seconds. Marking as low volatility."
+                                f"{symbol} inactive for {config.config.INACTIVITY_TIMEOUT} seconds. Marking as low volatility."
                             )
                             with portfolio_lock:
                                 low_volatility_assets.add(symbol)
@@ -212,9 +206,9 @@ class PriceMonitorManager:
             )
             trailing_stop = (
                 (
-                    TRAILING_STOP_FACTOR_EARLY
+                    config.config.TRAILING_STOP_FACTOR_EARLY
                     if holding_minutes < 15
-                    else TRAILING_STOP_FACTOR
+                    else config.config.TRAILING_STOP_FACTOR
                 )
                 * atr
                 / purchase_price
@@ -227,16 +221,16 @@ class PriceMonitorManager:
                 else asset.get("profit_target", 0.015)
             )
             if (
-                len(portfolio["assets"]) >= ASSET_THRESHOLD
+                len(portfolio["assets"]) >= config.config.ASSET_THRESHOLD
                 and current_price > purchase_price * 1.01
             ):
-                profit_target = min(profit_target, ADJUSTED_PROFIT_TARGET)
+                profit_target = min(profit_target, config.config.ADJUSTED_PROFIT_TARGET)
             asset["profit_target"] = profit_target
             ema_period = calculate_dynamic_ema_period(
                 holding_minutes,
-                TIME_STOP_MINUTES,
+                config.config.TIME_STOP_MINUTES,
                 len(portfolio["assets"]),
-                ASSET_THRESHOLD,
+                config.config.ASSET_THRESHOLD,
             )
             ema_dynamic = (
                 calculate_ema(symbol_candles["close"].values, ema_period)
@@ -254,7 +248,7 @@ class PriceMonitorManager:
                     (current_price - symbol_data["open"].iloc[0])
                     / symbol_data["open"].iloc[0]
                 ) * 100
-            if momentum < MOMENTUM_THRESHOLD:
+            if momentum < config.config.MOMENTUM_THRESHOLD:
                 negative_momentum_counts[symbol] = (
                     negative_momentum_counts.get(symbol, 0) + 1
                 )
@@ -277,19 +271,19 @@ class PriceMonitorManager:
                 min(sell_prices) if sell_prices else profit_target_price
             )
             catastrophic_loss = (
-                unrealized_profit <= CAT_LOSS_THRESHOLD
+                unrealized_profit <= config.config.CAT_LOSS_THRESHOLD
                 and abs(unrealized_profit) > 2 * atr / purchase_price
                 if atr > 0
                 else False
             )
-            time_stop = holding_minutes >= TIME_STOP_MINUTES and unrealized_profit < 0
+            time_stop = holding_minutes >= config.config.TIME_STOP_MINUTES and unrealized_profit < 0
             multiplied_profit_target = (
-                unrealized_profit >= PROFIT_TARGET_MULTIPLIER * profit_target
+                unrealized_profit >= config.config.PROFIT_TARGET_MULTIPLIER * profit_target
             )
-            regular_sell_signal = holding_minutes >= MIN_HOLDING_MINUTES and (
+            regular_sell_signal = holding_minutes >= config.config.MIN_HOLDING_MINUTES and (
                 trailing_loss >= trailing_stop
                 or unrealized_profit >= profit_target
-                or negative_momentum_counts.get(symbol, 0) >= MOMENTUM_CONFIRM_MINUTES
+                or negative_momentum_counts.get(symbol, 0) >= config.config.MOMENTUM_CONFIRM_MINUTES
             )
             sell_signal = (
                 multiplied_profit_target
@@ -305,7 +299,7 @@ class PriceMonitorManager:
                         "Time stop"
                         if time_stop
                         else (
-                            f"Multiplied profit target ({PROFIT_TARGET_MULTIPLIER}x = {(PROFIT_TARGET_MULTIPLIER * profit_target)*100:.1f}%)"
+                            f"Multiplied profit target ({config.config.PROFIT_TARGET_MULTIPLIER}x = {(config.config.PROFIT_TARGET_MULTIPLIER * profit_target)*100:.1f}%)"
                             if multiplied_profit_target
                             else (
                                 "Trailing stop"
@@ -346,13 +340,13 @@ class PriceMonitorManager:
         """
         if symbol not in self.threads and symbol not in low_volatility_assets:
             with threading.Lock():
-                global weight_used, CONCURRENT_REQUESTS
-                if len(self.threads) >= CONCURRENT_REQUESTS:
+                global weight_used
+                if len(self.threads) >= config.config.CONCURRENT_REQUESTS:
                     logger.warning(
-                        f"Max threads ({CONCURRENT_REQUESTS}) reached. Cannot start monitoring for {symbol}."
+                        f"Max threads ({config.config.CONCURRENT_REQUESTS}) reached. Cannot start monitoring for {symbol}."
                     )
                     return
-                if weight_used + 2 > RATE_LIMIT_WEIGHT * 0.8:
+                if weight_used + 2 > config.config.RATE_LIMIT_WEIGHT * 0.8:
                     logger.warning(
                         f"Approaching rate limit ({weight_used}). Delaying monitoring for {symbol}."
                     )

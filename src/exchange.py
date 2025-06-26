@@ -10,19 +10,19 @@ import pandas as pd
 from ccxt.base.errors import PermissionDenied
 from tenacity import retry, stop_after_attempt, wait_fixed
 
-from .config import (API_KEY, API_SECRET, CANDLE_LIMIT, CANDLE_TIMEFRAME,
-                     CONCURRENT_REQUESTS, RATE_LIMIT_WEIGHT, logger)
+from . import config
+from . config import (logger)
 from .state import (ban_expiry_time, is_banned, last_reset_time,
                     rate_limit_lock, weight_used)
 
 # Initialize rate limit tracking
-semaphore = Semaphore(CONCURRENT_REQUESTS)
+semaphore = Semaphore(config.config.CONCURRENT_REQUESTS)
 
 # Initialize Bitvavo client
 bitvavo = ccxt.bitvavo(
     {
-        "apiKey": API_KEY,
-        "secret": API_SECRET,
+        "apiKey": config.config.API_KEY,
+        "secret": config.config.API_SECRET,
         "enableRateLimit": True,
         "options": {"defaultType": "spot"},
     }
@@ -95,9 +95,9 @@ def check_rate_limit(request_weight):
             weight_used = 0
             last_reset_time = current_time
         logger.debug(
-            f"Checking rate limit: weight_used={weight_used}, request_weight={request_weight}, total={weight_used + request_weight}, limit={RATE_LIMIT_WEIGHT}"
+            f"Checking rate limit: weight_used={weight_used}, request_weight={request_weight}, total={weight_used + request_weight}, limit={config.config.RATE_LIMIT_WEIGHT}"
         )
-        if (weight_used + request_weight) > RATE_LIMIT_WEIGHT * 0.9:
+        if (weight_used + request_weight) > config.config.RATE_LIMIT_WEIGHT * 0.9:
             sleep_time = 60 - (current_time - last_reset_time)
             if sleep_time > 0:
                 logger.info(
@@ -183,7 +183,7 @@ def fetch_ticker_price(symbol):
 
 
 @retry(stop=stop_after_attempt(3), wait=wait_fixed(5))
-def fetch_klines(symbol, timeframe=CANDLE_TIMEFRAME, limit=CANDLE_LIMIT):
+def fetch_klines(symbol, timeframe=config.config.CANDLE_TIMEFRAME, limit=config.config.CANDLE_LIMIT):
     """
     Fetches OHLCV data for a given symbol from Bitvavo.
 

@@ -4,8 +4,8 @@ from datetime import datetime, timedelta
 import pandas as pd
 
 from .bitvavo_order_metrics import calculate_order_book_metrics
-from .config import (MIN_VOLUME_EUR, PRICE_INCREASE_THRESHOLD, MAX_SLIPPAGE_BUY, MAX_SLIPPAGE_SELL, ALLOCATION_PER_TRADE, MIN_TOTAL_SCORE,
-                     PRICE_RANGE_PERCENT, logger)
+from . import config
+from . config import (logger)
 from .exchange import check_rate_limit, semaphore
 from .state import low_volatility_assets, portfolio, portfolio_lock
 
@@ -18,22 +18,22 @@ RESET = "\033[0m"  # Resets color to default
 
 def colorize_value(value, column):
     if column == "slippage_buy":
-        if abs(value) < MAX_SLIPPAGE_BUY:
+        if abs(value) < config.config.MAX_SLIPPAGE_BUY:
             return f"{GREEN}{value:>7.3f}%{RESET}"
         else:
             return f"{RED}{value:>7.3f}%{RESET}"
     elif column == "slippage_sell":
-        if value > MAX_SLIPPAGE_SELL:
+        if value > config.config.MAX_SLIPPAGE_SELL:
             return f"{GREEN}{value:>7.3f}%{RESET}"
         else:
             return f"{RED}{value:>7.3f}%{RESET}"
     elif column == "percent_change":
-        if value > PRICE_INCREASE_THRESHOLD:
+        if value > config.config.PRICE_INCREASE_THRESHOLD:
             return f"{GREEN}{value:>6.3f}%{RESET}"
         else:
             return f"{RED}{value:>6.3f}%{RESET}"
     elif column == "volume_eur":
-        if value > MIN_VOLUME_EUR:
+        if value > config.config.MIN_VOLUME_EUR:
             return f"{GREEN}{value:>10.2f}€{RESET}"
         else:
             return f"{RED}{value:>10.2f}€{RESET}"
@@ -98,8 +98,8 @@ def verify_and_analyze_data(df, price_monitor_manager):
     ).dropna()
 
     above_threshold = percent_changes[
-        (percent_changes["percent_change"] >= PRICE_INCREASE_THRESHOLD)
-        & (percent_changes["volume_eur"] >= MIN_VOLUME_EUR)
+        (percent_changes["percent_change"] >= config.config.PRICE_INCREASE_THRESHOLD)
+        & (percent_changes["volume_eur"] >= config.config.MIN_VOLUME_EUR)
     ]
 
     order_book_metrics_list = []
@@ -112,44 +112,46 @@ def verify_and_analyze_data(df, price_monitor_manager):
             check_rate_limit(1)  # Assume order book fetch has weight of 2
             metrics = calculate_order_book_metrics(
                 market=symbol.replace("/", "-"),
-                amount_quote=portfolio['cash'] * ALLOCATION_PER_TRADE,
-                price_range_percent=PRICE_RANGE_PERCENT,
+                amount_quote=portfolio['cash'] * config.config.ALLOCATION_PER_TRADE,
+                price_range_percent=config.config.PRICE_RANGE_PERCENT,
             )
             metrics["bought"] = False  # Will be updated in portfolio.py if bought
             order_book_metrics_list.append(metrics)
 
     if not above_threshold.empty:
         logger.info(
-            f"{BRIGHT_BLUE}DATA GATHERING: Coins with price increase >= {PRICE_INCREASE_THRESHOLD}% and volume >= €{MIN_VOLUME_EUR}:   (only Buy if Total Score > {MIN_TOTAL_SCORE} and Slippage Buy < {MAX_SLIPPAGE_BUY}%){RESET}"
+            f"{BRIGHT_BLUE}DATA GATHERING: Coins with price increase >= {config.config.PRICE_INCREASE_THRESHOLD}% and volume >= €{config.config.MIN_VOLUME_EUR}:   (only Buy if Total Score > {config.config.MIN_TOTAL_SCORE} and Slippage Buy < {config.config.MAX_SLIPPAGE_BUY}%){RESET}"
         )
         for _, row in above_threshold.iterrows():
-
-            logger.info(
-                f"Symbol: {colorize_value(row['symbol'], 'symbol')}  "
-                f"Change: {colorize_value(row['percent_change'], 'percent_change')}  "
-                f"Volume: {colorize_value(row['volume_eur'], 'volume_eur')}  "
-                f"Open: {row['open_price']:>15.8f}  "
-                f"Close: {row['close_price']:>15.8f}  "
-                f"Slippage Buy: {colorize_value(metrics['slippage_buy'], 'slippage_buy')}  "
-                f"Slippage Sell: {colorize_value(metrics['slippage_sell'], 'slippage_sell')}  "
-                f"Total Score: {metrics['total_score']:>4.2f}  "
-                f"Recommendation: {colorize_value(metrics['recommendation'], 'recommendation')}  "
-                f"Latest Timestamp: {row['latest_timestamp']}"
-            )
+            try:
+                logger.info(
+                    f"Symbol: {colorize_value(row['symbol'], 'symbol')}  "
+                    f"Change: {colorize_value(row['percent_change'], 'percent_change')}  "
+                    f"Volume: {colorize_value(row['volume_eur'], 'volume_eur')}  "
+                    f"Open: {row['open_price']:>15.8f}  "
+                    f"Close: {row['close_price']:>15.8f}  "
+                    f"Slippage Buy: {colorize_value(metrics['slippage_buy'], 'slippage_buy')}  "
+                    f"Slippage Sell: {colorize_value(metrics['slippage_sell'], 'slippage_sell')}  "
+                    f"Total Score: {metrics['total_score']:>4.2f}  "
+                    f"Recommendation: {colorize_value(metrics['recommendation'], 'recommendation')}  "
+                    f"Latest Timestamp: {row['latest_timestamp']}"
+                )
+            except Exception as e:
+                logger.error(f"Something wrong here.")
 
     else:
         logger.info(
-            f"{BRIGHT_BLUE}DATA GATHERING: No coins with price increase >= {PRICE_INCREASE_THRESHOLD}% and trade volume >= {MIN_VOLUME_EUR} €   (only Buy if Total Score > {MIN_TOTAL_SCORE} and Slippage Buy < {MAX_SLIPPAGE_BUY}%){RESET}{RESET}"
+            f"{BRIGHT_BLUE}DATA GATHERING: No coins with price increase >= {config.config.PRICE_INCREASE_THRESHOLD}% and trade volume >= {config.config.MIN_VOLUME_EUR} €   (only Buy if Total Score > {config.config.MIN_TOTAL_SCORE} and Slippage Buy < {config.config.MAX_SLIPPAGE_BUY}%){RESET}{RESET}"
         )
 
     below_threshold = percent_changes[
-        percent_changes["percent_change"] < PRICE_INCREASE_THRESHOLD
+        percent_changes["percent_change"] < config.config.PRICE_INCREASE_THRESHOLD
     ]
     if not below_threshold.empty:
         top_5_below = below_threshold.sort_values(
             by="percent_change", ascending=False
         ).head(5)
-        logger.info(f"{BRIGHT_BLUE}DATA GATHERING: Top 5 coins with price increase < {PRICE_INCREASE_THRESHOLD}% or trade volume < {MIN_VOLUME_EUR} €:{RESET}")
+        logger.info(f"{BRIGHT_BLUE}DATA GATHERING: Top 5 coins with price increase < {config.config.PRICE_INCREASE_THRESHOLD}% or trade volume < {config.config.MIN_VOLUME_EUR} €:{RESET}")
         for _, row in top_5_below.iterrows():
 
             # Calculate order book metrics for top 5 below threshold
@@ -159,26 +161,28 @@ def verify_and_analyze_data(df, price_monitor_manager):
                 check_rate_limit(1)
                 metrics = calculate_order_book_metrics(
                     market=symbol.replace("/", "-"),
-                    amount_quote=portfolio['cash'] * ALLOCATION_PER_TRADE,
-                    price_range_percent=PRICE_RANGE_PERCENT,
+                    amount_quote=portfolio['cash'] * config.config.ALLOCATION_PER_TRADE,
+                    price_range_percent=config.config.PRICE_RANGE_PERCENT,
                 )
                 metrics["bought"] = False
                 order_book_metrics_list.append(metrics)
-
-            logger.info(
-                f"Symbol: {colorize_value(row['symbol'], 'symbol')}  "
-                f"Change: {colorize_value(row['percent_change'], 'percent_change')}  "
-                f"Volume: {colorize_value(row['volume_eur'], 'volume_eur')}  "
-                f"Open: {row['open_price']:>15.8f}  "
-                f"Close: {row['close_price']:>15.8f}  "
-                f"Slippage Buy: {colorize_value(metrics['slippage_buy'], 'slippage_buy')}  "
-                f"Slippage Sell: {colorize_value(metrics['slippage_sell'], 'slippage_sell')}  "
-                f"Total Score: {metrics['total_score']:>4.2f}  "
-                f"Recommendation: {colorize_value(metrics['recommendation'], 'recommendation')}  "
-                f"Latest Timestamp: {row['latest_timestamp']}"
-            )
+            try:
+                logger.info(
+                    f"Symbol: {colorize_value(row['symbol'], 'symbol')}  "
+                    f"Change: {colorize_value(row['percent_change'], 'percent_change')}  "
+                    f"Volume: {colorize_value(row['volume_eur'], 'volume_eur')}  "
+                    f"Open: {row['open_price']:>15.8f}  "
+                    f"Close: {row['close_price']:>15.8f}  "
+                    f"Slippage Buy: {colorize_value(metrics['slippage_buy'], 'slippage_buy')}  "
+                    f"Slippage Sell: {colorize_value(metrics['slippage_sell'], 'slippage_sell')}  "
+                    f"Total Score: {metrics['total_score']:>4.2f}  "
+                    f"Recommendation: {colorize_value(metrics['recommendation'], 'recommendation')}  "
+                    f"Latest Timestamp: {row['latest_timestamp']}"
+                )
+            except Exception as e:
+                logger.error(f"Something wrong here.")
     else:
-        logger.info(f"No coins with price increase < {PRICE_INCREASE_THRESHOLD}%")
+        logger.info(f"No coins with price increase < {config.config.PRICE_INCREASE_THRESHOLD}%")
 
     with portfolio_lock:
         for symbol in list(low_volatility_assets):
@@ -186,7 +190,7 @@ def verify_and_analyze_data(df, price_monitor_manager):
                 recent_change = percent_changes.loc[
                     percent_changes["symbol"] == symbol, "percent_change"
                 ].iloc[0]
-                if abs(recent_change) >= PRICE_INCREASE_THRESHOLD / 2:
+                if abs(recent_change) >= config.config.PRICE_INCREASE_THRESHOLD / 2:
                     logger.info(
                         f"{symbol} regained volatility (change: {recent_change:.2f}%). Resuming monitoring."
                     )

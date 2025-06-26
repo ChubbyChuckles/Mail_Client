@@ -8,14 +8,8 @@ from datetime import datetime, timedelta
 import numpy as np
 import pandas as pd
 
-from .config import (ADJUSTED_PROFIT_TARGET, ALLOCATION_PER_TRADE,
-                     ASSET_THRESHOLD, BUY_FEE, CAT_LOSS_THRESHOLD,
-                     FINISHED_TRADES_CSV, MAX_ACTIVE_ASSETS, MIN_TOTAL_SCORE,
-                     MIN_HOLDING_MINUTES, MOMENTUM_CONFIRM_MINUTES,
-                     MOMENTUM_THRESHOLD, PORTFOLIO_FILE, PORTFOLIO_VALUE,
-                     PROFIT_TARGET, PROFIT_TARGET_MULTIPLIER, SELL_FEE,
-                     TIME_STOP_MINUTES, TRAILING_STOP_FACTOR, MAX_SLIPPAGE_BUY,
-                     TRAILING_STOP_FACTOR_EARLY, logger)
+from . import config
+from . config import (logger)
 from .exchange import fetch_ticker_price, fetch_trade_details
 from .state import (low_volatility_assets, negative_momentum_counts, portfolio,
                     portfolio_lock)
@@ -49,10 +43,10 @@ def sell_asset(
                 )
                 return None
             sale_value = asset["quantity"] * current_price
-            sell_fee = sale_value * SELL_FEE
+            sell_fee = sale_value * config.config.SELL_FEE
             net_sale_value = sale_value - sell_fee
             buy_value = asset["quantity"] * asset["purchase_price"]
-            buy_fee = buy_value * BUY_FEE
+            buy_fee = buy_value * config.config.BUY_FEE
             profit_loss = net_sale_value - (buy_value + buy_fee)
             portfolio["cash"] += net_sale_value
             finished_trade = {
@@ -121,7 +115,7 @@ def sell_most_profitable_asset(
             (symbol, asset)
             for symbol, asset in portfolio["assets"].items()
             if (current_time - asset["purchase_time"]).total_seconds() / 60
-            >= MIN_HOLDING_MINUTES
+            >= config.config.MIN_HOLDING_MINUTES
         ]
         if not profitable_assets:
             logger.info("No profitable assets eligible for sale to free up slot.")
@@ -178,19 +172,19 @@ def save_portfolio():
                 },
             }
         # Save to primary file
-        with open(PORTFOLIO_FILE, "w") as f:
+        with open(config.config.PORTFOLIO_FILE, "w") as f:
             json.dump(portfolio_copy, f, indent=4)
 
         # Save to backup file
         backup_file = (
-            f"{PORTFOLIO_FILE}.backup_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}"
+            f"{config.config.PORTFOLIO_FILE}.backup_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}"
         )
         with open(backup_file, "w") as f:
             json.dump(portfolio_copy, f, indent=4)
         # logger.info(f"Saved portfolio to {PORTFOLIO_FILE} and backup {backup_file}")
 
         # Manage backup files: keep only the 3 latest
-        backup_files = glob.glob(f"{PORTFOLIO_FILE}.backup_*")
+        backup_files = glob.glob(f"{config.config.PORTFOLIO_FILE}.backup_*")
         backup_files.sort(key=lambda x: x.split("backup_")[-1], reverse=True)
         for old_file in backup_files[3:]:
             try:
@@ -201,7 +195,7 @@ def save_portfolio():
                     f"Error deleting old backup file {old_file}: {e}", exc_info=True
                 )
     except Exception as e:
-        logger.error(f"Error saving portfolio to {PORTFOLIO_FILE}: {e}", exc_info=True)
+        logger.error(f"Error saving portfolio to {config.config.PORTFOLIO_FILE}: {e}", exc_info=True)
 
 
 def manage_portfolio(
@@ -246,9 +240,9 @@ def manage_portfolio(
 
             # Adjust profit targets if portfolio is near threshold
             if (
-                len(portfolio["assets"]) >= ASSET_THRESHOLD
+                len(portfolio["assets"]) >= config.config.ASSET_THRESHOLD
                 and above_threshold_data
-                and portfolio["cash"] >= PORTFOLIO_VALUE * ALLOCATION_PER_TRADE
+                and portfolio["cash"] >= config.config.PORTFOLIO_VALUE * config.config.ALLOCATION_PER_TRADE
             ):
                 profitable_assets = [
                     symbol
@@ -256,16 +250,16 @@ def manage_portfolio(
                     if asset["current_price"] > asset["purchase_price"] * 1.01
                     and (datetime.utcnow() - asset["purchase_time"]).total_seconds()
                     / 60
-                    >= MIN_HOLDING_MINUTES
+                    >= config.config.MIN_HOLDING_MINUTES
                 ]
                 if profitable_assets:
                     for symbol in profitable_assets:
                         portfolio["assets"][symbol]["profit_target"] = min(
                             portfolio["assets"][symbol]["profit_target"],
-                            ADJUSTED_PROFIT_TARGET,
+                            config.config.ADJUSTED_PROFIT_TARGET,
                         )
                         logger.info(
-                            f"Adjusted profit target for {symbol} to {ADJUSTED_PROFIT_TARGET}"
+                            f"Adjusted profit target for {symbol} to {config.config.ADJUSTED_PROFIT_TARGET}"
                         )
                 else:
                     finished_trades.append(
@@ -333,9 +327,9 @@ def manage_portfolio(
                 )
                 trailing_stop = (
                     (
-                        TRAILING_STOP_FACTOR_EARLY
+                        config.config.TRAILING_STOP_FACTOR_EARLY
                         if holding_minutes < 15
-                        else TRAILING_STOP_FACTOR
+                        else config.config.TRAILING_STOP_FACTOR
                     )
                     * atr
                     / purchase_price
@@ -348,16 +342,16 @@ def manage_portfolio(
                     else asset.get("profit_target", 0.015)
                 )
                 if (
-                    len(portfolio["assets"]) >= ASSET_THRESHOLD
+                    len(portfolio["assets"]) >= config.config.ASSET_THRESHOLD
                     and current_price > purchase_price * 1.01
                 ):
-                    profit_target = min(profit_target, ADJUSTED_PROFIT_TARGET)
+                    profit_target = min(profit_target, config.config.ADJUSTED_PROFIT_TARGET)
                 asset["profit_target"] = profit_target
                 ema_period = calculate_dynamic_ema_period(
                     holding_minutes,
-                    TIME_STOP_MINUTES,
+                    config.config.TIME_STOP_MINUTES,
                     len(portfolio["assets"]),
-                    ASSET_THRESHOLD,
+                    config.config.ASSET_THRESHOLD,
                 )
                 ema_dynamic = (
                     calculate_ema(symbol_candles["close"].values, ema_period)
@@ -371,7 +365,7 @@ def manage_portfolio(
                     if not percent_changes[percent_changes["symbol"] == symbol].empty
                     else 0
                 )
-                if momentum < MOMENTUM_THRESHOLD:
+                if momentum < config.config.MOMENTUM_THRESHOLD:
                     negative_momentum_counts[symbol] = (
                         negative_momentum_counts.get(symbol, 0) + 1
                     )
@@ -404,22 +398,22 @@ def manage_portfolio(
                     min(sell_prices) if sell_prices else profit_target_price
                 )
                 catastrophic_loss = (
-                    unrealized_profit <= CAT_LOSS_THRESHOLD
+                    unrealized_profit <= config.config.CAT_LOSS_THRESHOLD
                     and abs(unrealized_profit) > 2 * atr / purchase_price
                     if atr > 0
                     else False
                 )
                 time_stop = (
-                    holding_minutes >= TIME_STOP_MINUTES and unrealized_profit < 0
+                    holding_minutes >= config.config.TIME_STOP_MINUTES and unrealized_profit < 0
                 )
                 multiplied_profit_target = (
-                    unrealized_profit >= PROFIT_TARGET_MULTIPLIER * profit_target
+                    unrealized_profit >= config.config.PROFIT_TARGET_MULTIPLIER * profit_target
                 )
-                regular_sell_signal = holding_minutes >= MIN_HOLDING_MINUTES and (
+                regular_sell_signal = holding_minutes >= config.config.MIN_HOLDING_MINUTES and (
                     trailing_loss >= trailing_stop
                     or unrealized_profit >= profit_target
                     or negative_momentum_counts.get(symbol, 0)
-                    >= MOMENTUM_CONFIRM_MINUTES
+                    >= config.config.MOMENTUM_CONFIRM_MINUTES
                 )
                 sell_signal = (
                     multiplied_profit_target
@@ -435,7 +429,7 @@ def manage_portfolio(
                             "Time stop"
                             if time_stop
                             else (
-                                f"Multiplied profit target ({PROFIT_TARGET_MULTIPLIER}x = {(PROFIT_TARGET_MULTIPLIER * profit_target)*100:.1f}%)"
+                                f"Multiplied profit target ({config.config.PROFIT_TARGET_MULTIPLIER}x = {(config.config.PROFIT_TARGET_MULTIPLIER * profit_target)*100:.1f}%)"
                                 if multiplied_profit_target
                                 else (
                                     "Trailing stop"
@@ -481,15 +475,15 @@ def manage_portfolio(
                         slippage_buy = metrics.get("slippage_buy")
                 if (
                     symbol not in portfolio["assets"]
-                    and portfolio["cash"] >= PORTFOLIO_VALUE * ALLOCATION_PER_TRADE
-                    and len(portfolio["assets"]) < MAX_ACTIVE_ASSETS
+                    and portfolio["cash"] >= config.config.PORTFOLIO_VALUE * config.config.ALLOCATION_PER_TRADE
+                    and len(portfolio["assets"]) < config.config.MAX_ACTIVE_ASSETS
                     and symbol not in low_volatility_assets
-                    and total_score >= MIN_TOTAL_SCORE
-                    and slippage_buy <= MAX_SLIPPAGE_BUY
+                    and total_score >= config.config.MIN_TOTAL_SCORE
+                    and slippage_buy <= config.config.MAX_SLIPPAGE_BUY
                 ):
                     purchase_price = record["close_price"]
-                    allocation = PORTFOLIO_VALUE * ALLOCATION_PER_TRADE
-                    buy_fee = allocation * BUY_FEE
+                    allocation = config.config.PORTFOLIO_VALUE * config.config.ALLOCATION_PER_TRADE
+                    buy_fee = allocation * config.config.BUY_FEE
                     net_allocation = allocation - buy_fee
                     quantity = net_allocation / purchase_price
                     trade_count, largest_trade_volume_eur = fetch_trade_details(
@@ -512,9 +506,9 @@ def manage_portfolio(
                         "purchase_time": current_time,
                         "highest_price": purchase_price,
                         "current_price": purchase_price,
-                        "profit_target": PROFIT_TARGET,
-                        "original_profit_target": PROFIT_TARGET,
-                        "sell_price": purchase_price * (1 + PROFIT_TARGET),
+                        "profit_target": config.config.PROFIT_TARGET,
+                        "original_profit_target": config.config.PROFIT_TARGET,
+                        "sell_price": purchase_price * (1 + config.config.PROFIT_TARGET),
                     }
                     portfolio["cash"] -= allocation
                     total_asset_value += net_allocation
@@ -529,9 +523,9 @@ def manage_portfolio(
                     price_monitor_manager.start(
                         symbol, portfolio, portfolio_lock, percent_changes
                     )
-                elif len(portfolio["assets"]) >= MAX_ACTIVE_ASSETS:
+                elif len(portfolio["assets"]) >= config.config.MAX_ACTIVE_ASSETS:
                     logger.warning(
-                        f"Cannot buy {symbol}: Maximum active assets ({MAX_ACTIVE_ASSETS}) reached."
+                        f"Cannot buy {symbol}: Maximum active assets ({config.config.MAX_ACTIVE_ASSETS}) reached."
                     )
                     finished_trades.append(
                         sell_most_profitable_asset(
@@ -542,13 +536,13 @@ def manage_portfolio(
                             price_monitor_manager=price_monitor_manager,
                         )
                     )
-                elif slippage_buy >= MAX_SLIPPAGE_BUY:
+                elif slippage_buy >= config.config.MAX_SLIPPAGE_BUY:
                     logger.info(
-                        f"Cannot buy {symbol}: Slippage Buy {slippage_buy:.2f}% is above threshold ({MAX_SLIPPAGE_BUY:.2f}%)."
+                        f"Cannot buy {symbol}: Slippage Buy {slippage_buy:.2f}% is above threshold ({config.config.MAX_SLIPPAGE_BUY:.2f}%)."
                     )
-                elif total_score <= MIN_TOTAL_SCORE:
+                elif total_score <= config.config.MIN_TOTAL_SCORE:
                     logger.info(
-                        f"Cannot buy {symbol}: Total Score {total_score:.2f} is below threshold {MIN_TOTAL_SCORE:.2f}."
+                        f"Cannot buy {symbol}: Total Score {total_score:.2f} is below threshold {config.config.MIN_TOTAL_SCORE:.2f}."
                     )
                 elif symbol in portfolio["assets"]:
                     logger.debug(f"Cannot buy {symbol}: Already owned.")

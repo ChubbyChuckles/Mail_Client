@@ -4,8 +4,8 @@ from datetime import datetime
 
 import pandas as pd
 
-from .config import (BUY_TRADES_CSV, FINISHED_TRADES_CSV,
-                     ORDER_BOOK_METRICS_CSV, logger)
+from . import config
+from . config import (logger)
 
 
 def calculate_ema(prices, period):
@@ -74,8 +74,8 @@ def append_to_buy_trades_csv(trade_data):
         trade_data (dict): Dictionary containing trade details.
     """
     try:
-        file_exists = os.path.exists(BUY_TRADES_CSV)
-        with open(BUY_TRADES_CSV, "a", newline="") as f:
+        file_exists = os.path.exists(config.config.BUY_TRADES_CSV)
+        with open(config.config.BUY_TRADES_CSV, "a", newline="") as f:
             writer = csv.DictWriter(
                 f,
                 fieldnames=[
@@ -93,10 +93,10 @@ def append_to_buy_trades_csv(trade_data):
                 writer.writeheader()
             writer.writerow(trade_data)
         logger.info(
-            f"Appended buy trade for {trade_data['Symbol']} to {BUY_TRADES_CSV}"
+            f"Appended buy trade for {trade_data['Symbol']} to {config.config.BUY_TRADES_CSV}"
         )
     except Exception as e:
-        logger.error(f"Error appending to {BUY_TRADES_CSV}: {e}")
+        logger.error(f"Error appending to {config.config.BUY_TRADES_CSV}: {e}")
 
 
 def append_to_finished_trades_csv(trade_data):
@@ -107,8 +107,8 @@ def append_to_finished_trades_csv(trade_data):
         trade_data (dict): Dictionary containing finished trade details.
     """
     try:
-        file_exists = os.path.exists(FINISHED_TRADES_CSV)
-        with open(FINISHED_TRADES_CSV, "a", newline="") as f:
+        file_exists = os.path.exists(config.config.FINISHED_TRADES_CSV)
+        with open(config.config.FINISHED_TRADES_CSV, "a", newline="") as f:
             writer = csv.DictWriter(
                 f,
                 fieldnames=[
@@ -129,10 +129,10 @@ def append_to_finished_trades_csv(trade_data):
                 writer.writeheader()
             writer.writerow(trade_data)
         logger.info(
-            f"Appended finished trade for {trade_data['Symbol']} to {FINISHED_TRADES_CSV}"
+            f"Appended finished trade for {trade_data['Symbol']} to {config.config.FINISHED_TRADES_CSV}"
         )
     except Exception as e:
-        logger.error(f"Error appending to {FINISHED_TRADES_CSV}: {e}")
+        logger.error(f"Error appending to {config.config.FINISHED_TRADES_CSV}: {e}")
 
 
 def append_to_order_book_metrics_csv(metrics_list):
@@ -143,7 +143,7 @@ def append_to_order_book_metrics_csv(metrics_list):
         metrics_list (list): List of dictionaries containing order book metrics and buy status.
     """
     try:
-        file_exists = os.path.exists(ORDER_BOOK_METRICS_CSV)
+        file_exists = os.path.exists(config.config.ORDER_BOOK_METRICS_CSV)
         fieldnames = [
             "Timestamp",
             "Market",
@@ -174,7 +174,7 @@ def append_to_order_book_metrics_csv(metrics_list):
             "Bought",
             "Error",
         ]
-        with open(ORDER_BOOK_METRICS_CSV, "a", newline="") as f:
+        with open(config.config.ORDER_BOOK_METRICS_CSV, "a", newline="") as f:
             writer = csv.DictWriter(f, fieldnames=fieldnames)
             if not file_exists:
                 writer.writeheader()
@@ -296,4 +296,4 @@ def append_to_order_book_metrics_csv(metrics_list):
         #     f"Appended {len(metrics_list)} order book metrics to {ORDER_BOOK_METRICS_CSV}"
         # )
     except Exception as e:
-        logger.error(f"Error appending to {ORDER_BOOK_METRICS_CSV}: {e}")
+        logger.error(f"Error appending to {config.config.ORDER_BOOK_METRICS_CSV}: {e}")
