@@ -91,7 +91,7 @@ def check_rate_limit(request_weight):
     with rate_limit_lock:
         current_time = time.time()
         if current_time - last_reset_time >= 60:
-            logger.info(f"Resetting rate limit: weight_used={weight_used} -> 0")
+            # logger.info(f"Resetting rate limit: weight_used={weight_used} -> 0")
             weight_used = 0
             last_reset_time = current_time
         logger.debug(

@@ -11,7 +11,7 @@ import pandas as pd
 
 from .config import (CONCURRENT_REQUESTS, LOOP_INTERVAL_SECONDS,
                      PARQUET_FILENAME, RESULTS_FOLDER, logger)
-from .data_processor import verify_and_analyze_data
+from .data_processor import verify_and_analyze_data, colorize_value
 from .exchange import bitvavo, check_rate_limit, fetch_klines
 from .portfolio import manage_portfolio, save_portfolio
 from .price_monitor import PriceMonitorManager
@@ -22,7 +22,8 @@ from miscellaneous.print_assets import print_portfolio
 from miscellaneous.clean_up import garbage_collection
 
 last_cycle_time = time.time()
-
+GREEN = "\033[32m"
+RESET = "\033[0m"
 
 def watchdog(price_monitor_manager):
     global last_cycle_time
@@ -46,32 +47,60 @@ def watchdog(price_monitor_manager):
         except Exception as e:
             logger.error(f"Watchdog error: {e}", exc_info=True)
 
+def center_text(text, total_width=256):
+    # Strip ANSI color codes for length calculation
+    clean_text = text.replace(GREEN, "").replace(RESET, "")
+    text_length = len(clean_text)
+    
+    # Calculate padding needed on each side
+    padding = (total_width - text_length) // 2
+    left_padding = " " * padding
+    right_padding = " " * (total_width - text_length - padding)
+    
+    # Return the padded text with color codes preserved
+    return f"{left_padding}{text}{right_padding}"
 
 def main():
-    logger.info("Starting trading bot...")
+    # logger.info("Starting trading bot...")
     price_monitor_manager = PriceMonitorManager()
     watchdog_thread = threading.Thread(
         target=watchdog, args=(price_monitor_manager,), daemon=True
     )
     watchdog_thread.start()
+    # Define ANSI color code for bright blue
+    BRIGHT_BLUE = "\033[94m"
+    RESET = "\033[0m"  # Resets color to default
+    YELLOW = "\033[33m"
 
     try:
+        logger.info(
+            f"{GREEN}{'=' * 256}{RESET}"
+        )
+        logger.info(
+            center_text(
+                f"{GREEN}CringeTrader 1.0.4{RESET}",
+                total_width=256
+            )
+        )
+        logger.info(
+            f"{GREEN}{'=' * 256}{RESET}"
+        )
         garbage_collection()
-        logger.info("Cleaning up old files...")
+        # logger.info("Cleaning up old files...")
         markets = bitvavo.load_markets()
         eur_pairs = [
             symbol
             for symbol in markets
             if symbol.endswith("/EUR") and markets[symbol].get("active", False)
         ]
-        logger.info(f"Loaded {len(markets)} markets, {len(eur_pairs)} active EUR pairs")
+        logger.info(f"Loaded {BRIGHT_BLUE}{len(markets)}{RESET} markets, {BRIGHT_BLUE}{len(eur_pairs)}{RESET} active EUR pairs")
         
 
         while True:
             global last_cycle_time
             last_cycle_time = time.time()
             all_data = []
-            logger.info("Fetching new data cycle...")
+            # logger.info("Fetching new data cycle...")
 
             if is_banned and time.time() < ban_expiry_time:
                 logger.warning(
@@ -96,14 +125,14 @@ def main():
             except Exception as e:
                 logger.error(f"Error fetching tickers for volume ranking: {e}")
                 symbols = eur_pairs[:300]
-            logger.info(f"Processing {len(symbols)} EUR symbols")
+            logger.info(f"Processing {GREEN}{len(symbols)}{RESET} EUR symbols")
 
             active_monitors = price_monitor_manager.active_monitors()
             adjusted_concurrency = max(
                 1, min(CONCURRENT_REQUESTS - active_monitors, 20)
             )
             logger.info(
-                f"Active monitors: {active_monitors}, Adjusted concurrency: {adjusted_concurrency}"
+                f"{YELLOW}ACTIVE MONITORS:{RESET} {active_monitors}     |     {YELLOW}ADJUSTED CONCURRENCY:{RESET} {adjusted_concurrency}"
             )
 
             
@@ -153,9 +182,7 @@ def main():
                         for asset in portfolio["assets"].values()
                     )
 
-                    # Define ANSI color code for bright blue
-                    BRIGHT_BLUE = "\033[94m"
-                    RESET = "\033[0m"  # Resets color to default
+                    
                     logger.info(
                         f"{BRIGHT_BLUE}PORTFOLIO STATUS: Cash: {portfolio['cash']:.2f} EUR, "
                         f"Assets: {len(portfolio['assets'])}, "
@@ -196,7 +223,16 @@ def main():
             elapsed_time = time.time() - last_cycle_time
             sleep_time = max(0, LOOP_INTERVAL_SECONDS - elapsed_time)
             logger.info(
-                f"Cycle completed in {elapsed_time:.2f} seconds. Sleeping for {sleep_time:.2f} seconds."
+                f"{GREEN}{'=' * 256}{RESET}"
+            )
+            logger.info(
+                center_text(
+                    f"{GREEN}Cycle completed in {elapsed_time:.2f} seconds. Sleeping for {sleep_time:.2f} seconds.{RESET}",
+                    total_width=256
+                )
+            )
+            logger.info(
+                f"{GREEN}{'=' * 256}{RESET}"
             )
             logger.debug(f"Active threads: {threading.active_count()}")
             time.sleep(sleep_time)

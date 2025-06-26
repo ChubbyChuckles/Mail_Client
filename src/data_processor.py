@@ -17,22 +17,22 @@ BRIGHT_BLUE = "\033[94m"
 RESET = "\033[0m"  # Resets color to default
 
 def colorize_value(value, column):
-    if column in ["slippage_buy"]:
+    if column == "slippage_buy":
         if abs(value) < MAX_SLIPPAGE_BUY:
             return f"{GREEN}{value:>7.3f}%{RESET}"
         else:
             return f"{RED}{value:>7.3f}%{RESET}"
-    elif column in ["slippage_sell"]:
+    elif column == "slippage_sell":
         if value > MAX_SLIPPAGE_SELL:
             return f"{GREEN}{value:>7.3f}%{RESET}"
         else:
             return f"{RED}{value:>7.3f}%{RESET}"
-    elif column in ["percent_change"]:
+    elif column == "percent_change":
         if value > PRICE_INCREASE_THRESHOLD:
             return f"{GREEN}{value:>6.3f}%{RESET}"
         else:
             return f"{RED}{value:>6.3f}%{RESET}"
-    elif column in ["volume_eur"]:
+    elif column == "volume_eur":
         if value > MIN_VOLUME_EUR:
             return f"{GREEN}{value:>10.2f}€{RESET}"
         else:
