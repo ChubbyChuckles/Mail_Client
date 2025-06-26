@@ -1,76 +1,231 @@
-# MAIL_CLIENT_TEST/tests/test_data_processor.py
-import logging
-from datetime import datetime, timedelta
-from unittest.mock import MagicMock
-
+# tests/test_data_processor.py
 import pandas as pd
 import pytest
+from datetime import datetime, timedelta
+from unittest.mock import patch, MagicMock
+import logging
+from src.data_processor import verify_and_analyze_data, colorize_value
 
-from src.config import MIN_VOLUME_EUR, PRICE_INCREASE_THRESHOLD, logger
-from src.data_processor import verify_and_analyze_data
-
+# Sample configuration values for testing
+MIN_VOLUME_EUR = 10000
+PRICE_INCREASE_THRESHOLD = 5.0
+MAX_SLIPPAGE_BUY = 0.5
+MAX_SLIPPAGE_SELL = -0.5
+ALLOCATION_PER_TRADE = 0.1
+PRICE_RANGE_PERCENT = 2.0
+MIN_TOTAL_SCORE = 0.7
 
 @pytest.fixture
-def mock_price_monitor():
-    """Mock PriceMonitorManager."""
+def sample_ohlcv_data():
+    """Fixture for sample OHLCV data."""
+    current_time = datetime.utcnow()
+    five_min_ago = current_time - timedelta(minutes=5)
+    ten_min_ago = current_time - timedelta(minutes=10)
+    data = {
+        "timestamp": [
+            five_min_ago, five_min_ago, ten_min_ago,
+            five_min_ago, five_min_ago, ten_min_ago
+        ],
+        "symbol": ["BTC/EUR", "ETH/EUR", "BTC/EUR", "ADA/EUR", "XRP/EUR", "ADA/EUR"],
+        "open": [50000.0, 3000.0, 49000.0, 1.0, 0.5, 0.95],
+        "close": [52500.0, 3150.0, 49500.0, 1.05, 0.52, 0.98],
+        "volume": [10.0, 1000.0, 15.0, 50000.0, 20000.0, 60000.0]
+    }
+    return pd.DataFrame(data)
+
+@pytest.fixture
+def price_monitor_manager():
+    """Fixture for a mock price monitor manager."""
     return MagicMock()
 
+@pytest.fixture
+def mock_logger():
+    """Fixture for mocking the logger."""
+    with patch("src.data_processor.logger") as mock:
+        yield mock
 
 @pytest.fixture
-def sample_data():
-    """Create sample OHLCV data."""
-    now = datetime.utcnow()
-    return pd.DataFrame(
-        {
-            "timestamp": [now - timedelta(minutes=1), now],
-            "open": [1000.0, 1050.0],
-            "high": [1100.0, 1150.0],
-            "low": [900.0, 1000.0],
-            "close": [1050.0, 1100.0],
-            "volume": [100.0, 150.0],
-            "symbol": ["BTC/EUR", "BTC/EUR"],
+def mock_check_rate_limit():
+    """Fixture for mocking check_rate_limit."""
+    with patch("src.data_processor.check_rate_limit") as mock:
+        yield mock
+
+@pytest.fixture
+def mock_calculate_order_book_metrics():
+    """Fixture for mocking calculate_order_book_metrics."""
+    with patch("src.data_processor.calculate_order_book_metrics") as mock:
+        mock.return_value = {
+            "slippage_buy": 0.3,
+            "slippage_sell": -0.2,
+            "total_score": 0.8,
+            "recommendation": "Strong Buy"
         }
-    )
+        yield mock
 
+@pytest.fixture
+def mock_portfolio():
+    """Fixture for mock portfolio."""
+    return {"cash": 10000, "assets": {"BTC/EUR": 0.1, "ADA/EUR": 1000}}
 
-def test_verify_and_analyze_data_valid(sample_data, mock_price_monitor, caplog):
-    """Test data analysis with valid input."""
-    with caplog.at_level(logging.INFO):
-        above_threshold, percent_changes = verify_and_analyze_data(
-            sample_data, mock_price_monitor
-        )
-        assert len(above_threshold) == 1
-        assert above_threshold[0]["symbol"] == "BTC/EUR"
-        assert not percent_changes.empty
-        assert "Coins with price increase" in caplog.text
+@pytest.fixture
+def mock_portfolio_lock():
+    """Fixture for mock portfolio lock."""
+    return MagicMock()
 
+@pytest.fixture
+def mock_low_volatility_assets():
+    """Fixture for mock low_volatility_assets."""
+    return {"ADA/EUR"}
 
-def test_verify_and_analyze_data_empty(caplog):
+def test_empty_dataframe(mock_logger):
     """Test handling of empty DataFrame."""
-    with caplog.at_level(logging.WARNING):
-        above_threshold, percent_changes = verify_and_analyze_data(
-            pd.DataFrame(), MagicMock()
-        )
-        assert above_threshold == []
-        assert percent_changes.empty
-        assert "Input DataFrame is empty" in caplog.text
+    df = pd.DataFrame()
+    price_monitor_manager = MagicMock()
+    result = verify_and_analyze_data(df, price_monitor_manager)
+    
+    assert result == ([], pd.DataFrame(), [])
+    mock_logger.warning.assert_called_with("Input DataFrame is empty.")
 
+def test_old_data(mock_logger):
+    """Test handling of data older than 10 minutes."""
+    old_time = datetime.utcnow() - timedelta(minutes=15)
+    df = pd.DataFrame({
+        "timestamp": [old_time],
+        "symbol": ["BTC/EUR"],
+        "open": [50000.0],
+        "close": [51000.0],
+        "volume": [10.0]
+    })
+    price_monitor_manager = MagicMock()
+    result = verify_and_analyze_data(df, price_monitor_manager)
+    
+    assert result == ([], pd.DataFrame(), [])
+    mock_logger.warning.assert_called_with("Data contains no candles from within the last 10 minutes.")
 
-def test_verify_and_analyze_data_old_data(caplog):
-    """Test handling of outdated data."""
-    old_data = pd.DataFrame(
-        {
-            "timestamp": [datetime.utcnow() - timedelta(minutes=15)],
-            "open": [1000.0],
-            "close": [1050.0],
-            "volume": [100.0],
-            "symbol": ["BTC/EUR"],
-        }
+def test_no_recent_data(mock_logger):
+    """Test handling of data with no candles within the last 5 minutes."""
+    ten_min_ago = datetime.utcnow() - timedelta(minutes=10)
+    df = pd.DataFrame({
+        "timestamp": [ten_min_ago],
+        "symbol": ["BTC/EUR"],
+        "open": [50000.0],
+        "close": [51000.0],
+        "volume": [10.0]
+    })
+    price_monitor_manager = MagicMock()
+    result = verify_and_analyze_data(df, price_monitor_manager)
+    
+    assert result == ([], pd.DataFrame(), [])
+    mock_logger.warning.assert_called_with("No recent data within the last 5 minutes.")
+
+def test_above_threshold_assets(sample_ohlcv_data, price_monitor_manager, mock_logger, mock_check_rate_limit, mock_calculate_order_book_metrics):
+    """Test assets meeting price increase and volume thresholds."""
+    result = verify_and_analyze_data(sample_ohlcv_data, price_monitor_manager)
+    
+    above_threshold_data, percent_changes, order_book_metrics_list = result
+    
+    # Check above threshold assets
+    assert len(above_threshold_data) > 0
+    assert any(d["symbol"] == "BTC/EUR" for d in above_threshold_data)  # BTC has 5% increase
+    assert any(d["symbol"] == "ETH/EUR" for d in above_threshold_data)  # ETH has 5% increase
+    
+    # Check percent changes DataFrame
+    assert not percent_changes.empty
+    assert "percent_change" in percent_changes.columns
+    assert "volume_eur" in percent_changes.columns
+    
+    # Check order book metrics
+    assert len(order_book_metrics_list) >= 2
+    assert all("bought" in metrics and metrics["bought"] is False for metrics in order_book_metrics_list)
+
+def test_below_threshold_logging(sample_ohlcv_data, price_monitor_manager, mock_logger, mock_check_rate_limit, mock_calculate_order_book_metrics):
+    """Test logging for assets below threshold."""
+    verify_and_analyze_data(sample_ohlcv_data, price_monitor_manager)
+    
+    # Check if logging for below threshold assets includes ADA/EUR and XRP/EUR
+    assert any("ADA/EUR" in call[0][0] for call in mock_logger.info.call_args_list)
+    assert any("XRP/EUR" in call[0][0] for call in mock_logger.info.call_args_list)
+
+def test_low_volatility_assets_resume_monitoring(sample_ohlcv_data, price_monitor_manager, mock_portfolio, mock_portfolio_lock, mock_low_volatility_assets, mock_logger, mock_check_rate_limit, mock_calculate_order_book_metrics):
+    """Test resuming monitoring for low volatility assets with significant price change."""
+    verify_and_analyze_data(sample_ohlcv_data, price_monitor_manager)
+    
+    # ADA/EUR has a 5.26% change, which is >= PRICE_INCREASE_THRESHOLD / 2 (2.5%)
+    assert "ADA/EUR" not in mock_low_volatility_assets
+    price_monitor_manager.start.assert_called()
+
+def test_colorize_value_slippage_buy():
+    """Test colorize_value for slippage_buy."""
+    assert "32m" in colorize_value(0.3, "slippage_buy")  # Green for < MAX_SLIPPAGE_BUY
+    assert "31m" in colorize_value(0.6, "slippage_buy")  # Red for >= MAX_SLIPPAGE_BUY
+
+def test_colorize_value_slippage_sell():
+    """Test colorize_value for slippage_sell."""
+    assert "32m" in colorize_value(-0.3, "slippage_sell")  # Green for > MAX_SLIPPAGE_SELL
+    assert "31m" in colorize_value(-0.6, "slippage_sell")  # Red for <= MAX_SLIPPAGE_SELL
+
+def test_colorize_value_percent_change():
+    """Test colorize_value for percent_change."""
+    assert "32m" in colorize_value(6.0, "percent_change")  # Green for > PRICE_INCREASE_THRESHOLD
+    assert "31m" in colorize_value(4.0, "percent_change")  # Red for <= PRICE_INCREASE_THRESHOLD
+
+def test_colorize_value_volume_eur():
+    """Test colorize_value for volume_eur."""
+    assert "32m" in colorize_value(15000, "volume_eur")  # Green for > MIN_VOLUME_EUR
+    assert "31m" in colorize_value(5000, "volume_eur")   # Red for <= MIN_VOLUME_EUR
+
+def test_colorize_value_recommendation():
+    """Test colorize_value for recommendation."""
+    assert "32m" in colorize_value("Strong Buy", "recommendation")  # Green for Strong Buy
+    assert "31m" in colorize_value("No Buy", "recommendation")      # Red for No Buy
+    assert "32m" not in colorize_value("Hold", "recommendation")    # No color for other recommendations
+
+def test_colorize_value_symbol():
+    """Test colorize_value for symbol."""
+    assert "33m" in colorize_value("BTC/EUR", "symbol")  # Yellow for symbol
+
+def test_invalid_data_handling():
+    """Test handling of invalid data (e.g., zero open price)."""
+    df = pd.DataFrame({
+        "timestamp": [datetime.utcnow()],
+        "symbol": ["BTC/EUR"],
+        "open": [0.0],  # Invalid open price
+        "close": [51000.0],
+        "volume": [10.0]
+    })
+    price_monitor_manager = MagicMock()
+    _, percent_changes, _ = verify_and_analyze_data(df, price_monitor_manager)
+    
+    assert percent_changes.empty  # Should drop rows with invalid open price
+
+def test_no_above_threshold_assets(mock_logger, price_monitor_manager):
+    """Test when no assets meet the threshold."""
+    df = pd.DataFrame({
+        "timestamp": [datetime.utcnow()],
+        "symbol": ["BTC/EUR"],
+        "open": [50000.0],
+        "close": [50100.0],  # 0.2% increase, below threshold
+        "volume": [5.0]      # Below volume threshold
+    })
+    result = verify_and_analyze_data(df, price_monitor_manager)
+    
+    assert result[0] == []  # No above threshold assets
+    mock_logger.info.assert_any_call(
+        f"\033[94mDATA GATHERING: No coins with price increase >= {PRICE_INCREASE_THRESHOLD}% and volume >= €{MIN_VOLUME_EUR}\033[0m"
     )
-    with caplog.at_level(logging.WARNING):
-        above_threshold, percent_changes = verify_and_analyze_data(
-            old_data, MagicMock()
-        )
-        assert above_threshold == []
-        assert percent_changes.empty
-        assert "no candles from within the last 10 minutes" in caplog.text
+
+def test_no_below_threshold_assets(mock_logger, price_monitor_manager):
+    """Test when no assets are below threshold."""
+    df = pd.DataFrame({
+        "timestamp": [datetime.utcnow()],
+        "symbol": ["BTC/EUR"],
+        "open": [50000.0],
+        "close": [52500.0],  # 5% increase
+        "volume": [100.0]
+    })
+    result = verify_and_analyze_data(df, price_monitor_manager)
+    
+    assert not result[1].empty
+    mock_logger.info.assert_any_call(
+        f"No coins with price increase < {PRICE_INCREASE_THRESHOLD}%"
+    )
