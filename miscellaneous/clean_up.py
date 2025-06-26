@@ -29,7 +29,7 @@ def delete_old_files(directories: List[str], keep_count: int = 5) -> None:
             files = [f for f in dir_path.glob("*") if f.is_file()]
 
             if not files:
-                logger.info(f"No files found in directory: {directory}")
+                # logger.info(f"No files found in directory: {directory}")
                 continue
 
             # Sort files by modification time (most recent first)
@@ -39,20 +39,20 @@ def delete_old_files(directories: List[str], keep_count: int = 5) -> None:
             files_to_delete = files[keep_count:]
 
             if not files_to_delete:
-                logger.info(f"Directory {directory} has {len(files)} files, all will be kept (less than or equal to {keep_count})")
+                # logger.info(f"Directory {directory} has {len(files)} files, all will be kept (less than or equal to {keep_count})")
                 continue
 
             # Delete older files
             for file in files_to_delete:
                 try:
                     file.unlink()
-                    logger.info(f"Deleted file: {file}")
+                    # logger.info(f"Deleted file: {file}")
                 except PermissionError:
                     logger.error(f"Permission denied when deleting file: {file}")
                 except Exception as e:
                     logger.error(f"Error deleting file {file}: {str(e)}")
 
-            logger.info(f"Directory {directory}: Kept {min(keep_count, len(files))} files, deleted {len(files_to_delete)} files")
+            # logger.info(f"Directory {directory}: Kept {min(keep_count, len(files))} files, deleted {len(files_to_delete)} files")
 
         except Exception as e:
             logger.error(f"Error processing directory {directory}: {str(e)}")

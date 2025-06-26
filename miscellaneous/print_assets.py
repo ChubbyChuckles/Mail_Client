@@ -22,9 +22,9 @@ def colorize_value(value: Any, column: str, current_price: float, purchase_price
                     else f"{GREEN}{value:>15.8f}{RESET}")
         return f"{value:>6.3f}%" if column == "original_profit_target" else f"{value:>15.8f}"
     elif column == "profit_loss_percent":
-        return f"{GREEN if value > 0 else RED}{value:>6.3f}{RESET}%"
+        return f"{GREEN if value > 0 else RED}{value:>6.3f}%{RESET}"
     elif column == "total_value":
-        return f"{GREEN if current_price > purchase_price else RED}{value:>12.2f}{RESET}€"
+        return f"{GREEN if current_price > purchase_price else RED}{value:>12.2f}€{RESET}"
     return str(value)
 
 def print_portfolio(file_path: str) -> None:
