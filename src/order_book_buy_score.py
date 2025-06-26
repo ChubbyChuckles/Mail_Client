@@ -7,7 +7,8 @@ from datetime import datetime
 import matplotlib.pyplot as plt
 import numpy as np
 
-from .config import logger
+from . import config
+from . config import (logger)
 
 
 def calculate_mid_price(order_book):

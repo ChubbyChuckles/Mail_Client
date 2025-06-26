@@ -4,10 +4,11 @@ import time
 from datetime import datetime
 from threading import Lock, RLock
 
-from .config import PORTFOLIO_FILE, PORTFOLIO_VALUE, logger
+from . import config
+from . config import (logger)
 
 # Initialize global state
-portfolio = {"cash": PORTFOLIO_VALUE, "assets": {}}
+portfolio = {"cash": config.config.PORTFOLIO_VALUE, "assets": {}}
 portfolio_lock = RLock()  # Use RLock instead of Lock
 rate_limit_lock = Lock()
 
@@ -22,7 +23,7 @@ ban_expiry_time = 0
 def load_portfolio():
     global portfolio
     try:
-        with open(PORTFOLIO_FILE, "r") as f:
+        with open(config.config.PORTFOLIO_FILE, "r") as f:
             portfolio_data = json.load(f)
             portfolio["cash"] = portfolio_data["cash"]
             portfolio["assets"] = {
@@ -36,15 +37,15 @@ def load_portfolio():
                 }
                 for symbol, asset in portfolio_data["assets"].items()
             }
-        logger.info(f"Loaded portfolio from {PORTFOLIO_FILE}")
+        logger.info(f"Loaded portfolio from {config.config.PORTFOLIO_FILE}")
     except Exception as e:
         logger.error(
-            f"Error loading portfolio from {PORTFOLIO_FILE}: {e}", exc_info=True
+            f"Error loading portfolio from {config.config.PORTFOLIO_FILE}: {e}", exc_info=True
         )
         # Try loading from latest backup
         import glob
 
-        backup_files = sorted(glob.glob(f"{PORTFOLIO_FILE}.backup_*"), reverse=True)
+        backup_files = sorted(glob.glob(f"{config.config.PORTFOLIO_FILE}.backup_*"), reverse=True)
         for backup_file in backup_files:
             try:
                 with open(backup_file, "r") as f:
@@ -72,7 +73,7 @@ def load_portfolio():
             logger.warning(
                 "No valid portfolio file found. Initializing default portfolio."
             )
-            portfolio = {"cash": PORTFOLIO_VALUE, "assets": {}}
+            portfolio = {"cash": config.config.PORTFOLIO_VALUE, "assets": {}}
 
 
 def save_state():

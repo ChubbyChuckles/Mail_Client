@@ -7,8 +7,6 @@ Modules include configuration, exchange interactions, portfolio management, data
 price monitoring, notifications, storage, utilities, and state management.
 """
 
-from .config import (API_KEY, API_SECRET, LOOP_INTERVAL_SECONDS,
-                     PORTFOLIO_VALUE, logger)
 from .data_processor import verify_and_analyze_data
 from .exchange import (bitvavo, fetch_klines, fetch_ticker_price,
                        fetch_trade_details)

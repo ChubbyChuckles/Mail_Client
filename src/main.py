@@ -9,8 +9,8 @@ import os
 
 import pandas as pd
 
-from .config import (CONCURRENT_REQUESTS, LOOP_INTERVAL_SECONDS,
-                     PARQUET_FILENAME, RESULTS_FOLDER, logger)
+from . import config
+from . config import (logger)
 from .data_processor import verify_and_analyze_data, colorize_value
 from .exchange import bitvavo, check_rate_limit, fetch_klines
 from .portfolio import manage_portfolio, save_portfolio
@@ -18,9 +18,9 @@ from .price_monitor import PriceMonitorManager
 from .state import (ban_expiry_time, is_banned, low_volatility_assets,
                     portfolio, portfolio_lock)
 from .storage import save_to_local
-from miscellaneous.print_assets import print_portfolio
-from miscellaneous.clean_up import garbage_collection
-from miscellaneous.print_trade_variables import print_trade_variables
+from .print_assets import print_portfolio
+from .clean_up import garbage_collection
+from .print_trade_variables import print_trade_variables
 
 last_cycle_time = time.time()
 GREEN = "\033[32m"
@@ -34,19 +34,19 @@ def watchdog(price_monitor_manager):
     while True:
         try:
             current_time = time.time()
-            if current_time - last_cycle_time > LOOP_INTERVAL_SECONDS * 2:
-                logger.error("Main loop appears to be hung. Checking ban status...")
+            if current_time - last_cycle_time > config.config.LOOP_INTERVAL_SECONDS * 2:
+                config.logger.error("Main loop appears to be hung. Checking ban status...")
                 if is_banned and current_time < ban_expiry_time:
-                    logger.info(
+                    config.logger.info(
                         f"API is banned until {datetime.utcfromtimestamp(ban_expiry_time)}. Stopping monitors and waiting..."
                     )
                     price_monitor_manager.stop_all()  # Stop all monitoring threads
                     time.sleep(min(ban_expiry_time - current_time, 60))
                 else:
-                    logger.error("Main loop hung without ban. Attempting recovery...")
+                    config.logger.error("Main loop hung without ban. Attempting recovery...")
             time.sleep(10)
         except Exception as e:
-            logger.error(f"Watchdog error: {e}", exc_info=True)
+            config.logger.error(f"Watchdog error: {e}", exc_info=True)
 
 def center_text(text, total_width=256):
     # Strip ANSI color codes for length calculation
@@ -74,16 +74,16 @@ def main():
     YELLOW = "\033[33m"
 
     try:
-        logger.info(
+        config.logger.info(
             f"{GREEN}{'=' * 256}{RESET}"
         )
-        logger.info(
+        config.logger.info(
             center_text(
                 f"{GREEN}CringeTrader 1.0.4{RESET}",
                 total_width=256
             )
         )
-        logger.info(
+        config.logger.info(
             f"{GREEN}{'=' * 256}{RESET}"
         )
         print_trade_variables(vars_per_line=7, total_line_width=256)
@@ -95,18 +95,21 @@ def main():
             for symbol in markets
             if symbol.endswith("/EUR") and markets[symbol].get("active", False)
         ]
-        logger.info(f"Loaded {BRIGHT_BLUE}{len(markets)}{RESET} markets, {BRIGHT_BLUE}{len(eur_pairs)}{RESET} active EUR pairs")
+        config.logger.info(f"Loaded {BRIGHT_BLUE}{len(markets)}{RESET} markets, {BRIGHT_BLUE}{len(eur_pairs)}{RESET} active EUR pairs")
         
 
         while True:
-            
+            try:
+                config.reload_config()  # Reload configuration
+            except Exception as e:
+                config.logger.error(f"Error reloading configuration: {e}", exc_info=True)
             global last_cycle_time
             last_cycle_time = time.time()
             all_data = []
             # logger.info("Fetching new data cycle...")
 
             if is_banned and time.time() < ban_expiry_time:
-                logger.warning(
+                config.logger.warning(
                     f"API is banned until {datetime.utcfromtimestamp(ban_expiry_time)}. Skipping data fetch."
                 )
                 time.sleep(min(ban_expiry_time - time.time(), 60))
@@ -126,22 +129,22 @@ def main():
                 )[:300]
                 symbols = [symbol for symbol, _ in top_volume]
             except Exception as e:
-                logger.error(f"Error fetching tickers for volume ranking: {e}")
+                config.logger.error(f"Error fetching tickers for volume ranking: {e}")
                 symbols = eur_pairs[:300]
-            logger.info(f"Processing {GREEN}{len(symbols)}{RESET} EUR symbols")
+            config.logger.info(f"Processing {GREEN}{len(symbols)}{RESET} EUR symbols")
 
             active_monitors = price_monitor_manager.active_monitors()
             adjusted_concurrency = max(
-                1, min(CONCURRENT_REQUESTS - active_monitors, 20)
+                1, min(config.config.CONCURRENT_REQUESTS - active_monitors, 20)
             )
-            logger.info(
+            config.logger.info(
                 f"{YELLOW}ACTIVE MONITORS:{RESET} {active_monitors}     |     {YELLOW}ADJUSTED CONCURRENCY:{RESET} {adjusted_concurrency}"
             )
 
             
 
             with ThreadPoolExecutor(max_workers=adjusted_concurrency) as executor:
-                logger.debug(
+                config.logger.debug(
                     f"Starting ThreadPoolExecutor with {adjusted_concurrency} workers"
                 )
                 results = []
@@ -167,7 +170,7 @@ def main():
 
             if all_data:
                 combined_df = pd.concat(all_data, ignore_index=True)
-                output_path = f"{RESULTS_FOLDER}/{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}_{PARQUET_FILENAME}"
+                output_path = f"{config.config.RESULTS_FOLDER}/{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}_{config.config.PARQUET_FILENAME}"
                 save_to_local(combined_df, output_path)
                 above_threshold_data, percent_changes, order_book_metrics_list = (
                     verify_and_analyze_data(combined_df, price_monitor_manager)
@@ -224,7 +227,7 @@ def main():
 
             save_state()
             elapsed_time = time.time() - last_cycle_time
-            sleep_time = max(0, LOOP_INTERVAL_SECONDS - elapsed_time)
+            sleep_time = max(0, config.config.LOOP_INTERVAL_SECONDS - elapsed_time)
             logger.info(
                 f"{GREEN}{'=' * 256}{RESET}"
             )

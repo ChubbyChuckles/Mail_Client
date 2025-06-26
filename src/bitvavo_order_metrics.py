@@ -4,16 +4,16 @@ from urllib.parse import urlencode
 import requests
 from python_bitvavo_api.bitvavo import Bitvavo
 
-from src.config import (  # Replace with your config or use env variables
-    API_KEY, API_SECRET)
+from . import config
+from . config import (logger)
 
 from .order_book_buy_score import analyze_buy_decision
 
 # Initialize Bitvavo client
 bitvavo = Bitvavo(
     {
-        "APIKEY": API_KEY,
-        "APISECRET": API_SECRET,
+        "APIKEY": config.config.API_KEY,
+        "APISECRET": config.config.API_SECRET,
         "RESTURL": "https://api.bitvavo.com/v2",
         "WSURL": "wss://ws.bitvavo.com/v2/",
     }

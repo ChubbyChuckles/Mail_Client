@@ -7,7 +7,8 @@ import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
 
-from .config import PORTFOLIO_FILE, RESULTS_FOLDER, logger
+from . import config
+from . config import (logger)
 from .state import portfolio, portfolio_lock
 
 
@@ -54,8 +55,8 @@ def save_portfolio():
                     for symbol, asset in portfolio["assets"].items()
                 },
             }
-        with open(PORTFOLIO_FILE, "w") as f:
+        with open(config.config.PORTFOLIO_FILE, "w") as f:
             json.dump(portfolio_copy, f, indent=4)
-        logger.info(f"Saved portfolio to {PORTFOLIO_FILE}")
+        logger.info(f"Saved portfolio to {config.config.PORTFOLIO_FILE}")
     except Exception as e:
-        logger.error(f"Error saving portfolio to {PORTFOLIO_FILE}: {e}", exc_info=True)
+        logger.error(f"Error saving portfolio to {config.config.PORTFOLIO_FILE}: {e}", exc_info=True)

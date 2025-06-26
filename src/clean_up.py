@@ -2,7 +2,7 @@ import os
 import glob
 from pathlib import Path
 from typing import List
-from src.config import logger
+from .config import (logger)
 
 def delete_old_files(directories: List[str], keep_count: int = 5) -> None:
     """

@@ -1,27 +1,5 @@
-from src.config import (
-    CONCURRENT_REQUESTS,
-    PRICE_INCREASE_THRESHOLD,
-    MIN_VOLUME_EUR,
-    PORTFOLIO_VALUE,
-    ALLOCATION_PER_TRADE,
-    BUY_FEE,
-    SELL_FEE,
-    TRAILING_STOP_FACTOR,
-    TRAILING_STOP_FACTOR_EARLY,
-    ADJUSTED_PROFIT_TARGET,
-    PROFIT_TARGET,
-    MIN_HOLDING_MINUTES,
-    TIME_STOP_MINUTES,
-    CAT_LOSS_THRESHOLD,
-    MOMENTUM_CONFIRM_MINUTES,
-    MOMENTUM_THRESHOLD,
-    MAX_ACTIVE_ASSETS,
-    ASSET_THRESHOLD,
-    MAX_SLIPPAGE_BUY,
-    MAX_SLIPPAGE_SELL,
-    MIN_TOTAL_SCORE,
-    logger
-)
+from . import config
+from .config import (logger)
 from dotenv import load_dotenv
 import os
 
@@ -36,60 +14,33 @@ def reload_trade_variables():
     Reload environment variables from .env and update trade-related variables.
     Returns a list of (name, formatted_value) tuples.
     """
-    # Reload .env file
-    load_dotenv(override=True)  # override=True ensures updated values are loaded
-
-    # Re-import variables from src.config after reloading .env
-    from src.config import (
-        CONCURRENT_REQUESTS,
-        PRICE_INCREASE_THRESHOLD,
-        MIN_VOLUME_EUR,
-        PORTFOLIO_VALUE,
-        ALLOCATION_PER_TRADE,
-        BUY_FEE,
-        SELL_FEE,
-        TRAILING_STOP_FACTOR,
-        TRAILING_STOP_FACTOR_EARLY,
-        ADJUSTED_PROFIT_TARGET,
-        PROFIT_TARGET,
-        MIN_HOLDING_MINUTES,
-        TIME_STOP_MINUTES,
-        CAT_LOSS_THRESHOLD,
-        MOMENTUM_CONFIRM_MINUTES,
-        MOMENTUM_THRESHOLD,
-        MAX_ACTIVE_ASSETS,
-        ASSET_THRESHOLD,
-        MAX_SLIPPAGE_BUY,
-        MAX_SLIPPAGE_SELL,
-        MIN_TOTAL_SCORE
-    )
 
     # Create updated trade_variables list with the same structure and formatting
     return [
         # Buy Criteria
-        ("Portfolio Value", f"{PORTFOLIO_VALUE:,.2f}€"),
-        ("Price Increase Threshold", f"{PRICE_INCREASE_THRESHOLD:.3f}%"),
-        ("Min Volume EUR", f"{MIN_VOLUME_EUR:,.2f}€"),
-        ("Allocation Per Trade", f"{ALLOCATION_PER_TRADE:.3f}"),
-        ("Min Total Score", f"{MIN_TOTAL_SCORE:.2f}"),
-        ("Max Slippage Buy", f"{MAX_SLIPPAGE_BUY:.3f}%"),
-        ("Max Slippage Sell", f"{MAX_SLIPPAGE_SELL:.3f}%"),
+        ("Portfolio Value", f"{config.config.PORTFOLIO_VALUE:,.2f}€"),
+        ("Price Increase Threshold", f"{config.config.PRICE_INCREASE_THRESHOLD:.3f}%"),
+        ("Min Volume EUR", f"{config.config.MIN_VOLUME_EUR:,.2f}€"),
+        ("Allocation Per Trade", f"{config.config.ALLOCATION_PER_TRADE:.3f}"),
+        ("Min Total Score", f"{config.config.MIN_TOTAL_SCORE:.2f}"),
+        ("Max Slippage Buy", f"{config.config.MAX_SLIPPAGE_BUY:.3f}%"),
+        ("Max Slippage Sell", f"{config.config.MAX_SLIPPAGE_SELL:.3f}%"),
         # Processing and Selling Criteria
-        ("Concurrent Requests", f"{CONCURRENT_REQUESTS}"),
-        ("Asset Threshold", f"{ASSET_THRESHOLD}"),
-        ("Max Active Assets", f"{MAX_ACTIVE_ASSETS}"),
-        ("Trailing Stop Factor", f"{TRAILING_STOP_FACTOR:.2f}"),
-        ("Trailing Stop Factor Early", f"{TRAILING_STOP_FACTOR_EARLY:.2f}"),
-        ("Adjusted Profit Target", f"{ADJUSTED_PROFIT_TARGET:.4f}"),
-        ("Profit Target", f"{PROFIT_TARGET:.4f}"),
+        ("Concurrent Requests", f"{config.config.CONCURRENT_REQUESTS}"),
+        ("Asset Threshold", f"{config.config.ASSET_THRESHOLD}"),
+        ("Max Active Assets", f"{config.config.MAX_ACTIVE_ASSETS}"),
+        ("Trailing Stop Factor", f"{config.config.TRAILING_STOP_FACTOR:.2f}"),
+        ("Trailing Stop Factor Early", f"{config.config.TRAILING_STOP_FACTOR_EARLY:.2f}"),
+        ("Adjusted Profit Target", f"{config.config.ADJUSTED_PROFIT_TARGET:.4f}"),
+        ("Profit Target", f"{config.config.PROFIT_TARGET:.4f}"),
         # Tertiary Trade Variables
-        ("Buy Fee", f"{BUY_FEE:.4f}"),
-        ("Sell Fee", f"{SELL_FEE:.4f}"),
-        ("Cat Loss Threshold", f"{CAT_LOSS_THRESHOLD:.3f}%"),
-        ("Momentum Confirm Minutes", f"{MOMENTUM_CONFIRM_MINUTES}"),
-        ("Momentum Threshold", f"{MOMENTUM_THRESHOLD:.3f}%"),
-        ("Time Stop Minutes", f"{TIME_STOP_MINUTES}"),
-        ("Min Holding Minutes", f"{MIN_HOLDING_MINUTES}"),
+        ("Buy Fee", f"{config.config.BUY_FEE:.4f}"),
+        ("Sell Fee", f"{config.config.SELL_FEE:.4f}"),
+        ("Cat Loss Threshold", f"{config.config.CAT_LOSS_THRESHOLD:.3f}%"),
+        ("Momentum Confirm Minutes", f"{config.config.MOMENTUM_CONFIRM_MINUTES}"),
+        ("Momentum Threshold", f"{config.config.MOMENTUM_THRESHOLD:.3f}%"),
+        ("Time Stop Minutes", f"{config.config.TIME_STOP_MINUTES}"),
+        ("Min Holding Minutes", f"{config.config.MIN_HOLDING_MINUTES}"),
     ]
 
 def print_trade_variables(vars_per_line=3, total_line_width=120):
