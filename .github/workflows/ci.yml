@@ -9,8 +9,8 @@ on:
       - main
 
 jobs:
-  test:
-    name: Test and Lint (Python ${{ matrix.python-version }})
+  test-and-format:
+    name: Test and Format (Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -20,7 +20,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0 # Fetch full history for proper linting and versioning
+          fetch-depth: 0 # Fetch full history for git-auto-commit-action
 
       - name: Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@v5
@@ -40,7 +40,6 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           pip install pytest pytest-mock black isort
-        continue-on-error: false # Fail on dependency installation errors
 
       - name: Print environment details
         run: |
@@ -50,23 +49,15 @@ jobs:
           ls -R
         shell: bash
 
-      - name: Check code formatting with black
-        run: black --check --diff .
-        continue-on-error: false # Fail if formatting check fails
-
-      - name: Check code formatting with isort
-        run: isort --check-only --diff .
-        continue-on-error: false # Fail if import sorting check fails
-
       - name: Format code with black
         if: github.event_name == 'pull_request' # Only format on PRs
         run: black .
-        continue-on-error: true # Allow formatting to fail without stopping CI
+        continue-on-error: true # Allow formatting to proceed even if errors occur
 
       - name: Format code with isort
         if: github.event_name == 'pull_request' # Only format on PRs
         run: isort .
-        continue-on-error: true # Allow formatting to fail without stopping CI
+        continue-on-error: true # Allow formatting to proceed even if errors occur
 
       - name: Commit formatting changes
         if: github.event_name == 'pull_request'
@@ -81,7 +72,6 @@ jobs:
         run: pytest -v --capture=sys tests/
         env:
           PYTEST_ADDOPTS: --log-cli-level=DEBUG # Enable debug logging
-        continue-on-error: false # Fail if tests fail
 
       - name: Upload test logs
         if: always() # Run even if tests fail
@@ -93,10 +83,10 @@ jobs:
             pytest*.log
           retention-days: 7
 
-  lint-only:
-    name: Lint Only
+  lint:
+    name: Lint Check
     runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request' # Run only on PRs
+    if: github.event_name == 'push' # Run linting checks only on push to main
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -113,8 +103,6 @@ jobs:
 
       - name: Check code formatting with black
         run: black --check --diff .
-        continue-on-error: false
 
       - name: Check code formatting with isort
         run: isort --check-only --diff .
-        continue-on-error: false
