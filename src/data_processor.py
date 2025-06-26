@@ -4,7 +4,7 @@ from datetime import datetime, timedelta
 import pandas as pd
 
 from .bitvavo_order_metrics import calculate_order_book_metrics
-from .config import (AMOUNT_QUOTE, MIN_VOLUME_EUR, PRICE_INCREASE_THRESHOLD, MAX_SLIPPAGE_BUY, MAX_SLIPPAGE_SELL,
+from .config import (AMOUNT_QUOTE, MIN_VOLUME_EUR, PRICE_INCREASE_THRESHOLD, MAX_SLIPPAGE_BUY, MAX_SLIPPAGE_SELL, ALLOCATION_PER_TRADE, MIN_TOTAL_SCORE,
                      PRICE_RANGE_PERCENT, logger)
 from .exchange import check_rate_limit, semaphore
 from .state import low_volatility_assets, portfolio, portfolio_lock
@@ -13,6 +13,7 @@ from .state import low_volatility_assets, portfolio, portfolio_lock
 GREEN = "\033[32m"
 RED = "\033[31m"
 YELLOW = "\033[33m"
+BRIGHT_BLUE = "\033[94m"
 RESET = "\033[0m"  # Resets color to default
 
 def colorize_value(value, column):
@@ -110,7 +111,7 @@ def verify_and_analyze_data(df, price_monitor_manager):
             check_rate_limit(1)  # Assume order book fetch has weight of 2
             metrics = calculate_order_book_metrics(
                 market=symbol.replace("/", "-"),
-                amount_quote=AMOUNT_QUOTE,
+                amount_quote=portfolio['cash'] * ALLOCATION_PER_TRADE,
                 price_range_percent=PRICE_RANGE_PERCENT,
             )
             metrics["bought"] = False  # Will be updated in portfolio.py if bought
@@ -118,7 +119,7 @@ def verify_and_analyze_data(df, price_monitor_manager):
 
     if not above_threshold.empty:
         logger.info(
-            f"\nCoins with price increase >= {PRICE_INCREASE_THRESHOLD}% and volume >= €{MIN_VOLUME_EUR}:"
+            f"{BRIGHT_BLUE}DATA GATHERING: Coins with price increase >= {PRICE_INCREASE_THRESHOLD}% and volume >= €{MIN_VOLUME_EUR}:   (only Buy if Total Score > {MIN_TOTAL_SCORE} and Slippage Buy < {MAX_SLIPPAGE_BUY}%){RESET}"
         )
         for _, row in above_threshold.iterrows():
 
@@ -126,8 +127,8 @@ def verify_and_analyze_data(df, price_monitor_manager):
                 f"Symbol: {colorize_value(row['symbol'], 'symbol')}  "
                 f"Change: {colorize_value(row['percent_change'], 'percent_change')}  "
                 f"Volume: {colorize_value(row['volume_eur'], 'volume_eur')}  "
-                f"Open: {row['open_price']:>12.8f}  "
-                f"Close: {row['close_price']:>12.8f}  "
+                f"Open: {row['open_price']:>15.8f}  "
+                f"Close: {row['close_price']:>15.8f}  "
                 f"Slippage Buy: {colorize_value(metrics['slippage_buy'], 'slippage_buy')}  "
                 f"Slippage Sell: {colorize_value(metrics['slippage_sell'], 'slippage_sell')}  "
                 f"Total Score: {metrics['total_score']:>4.2f}  "
@@ -137,7 +138,7 @@ def verify_and_analyze_data(df, price_monitor_manager):
 
     else:
         logger.info(
-            f"No coins with price increase >= {PRICE_INCREASE_THRESHOLD}% and volume >= €{MIN_VOLUME_EUR}"
+            f"{BRIGHT_BLUE}DATA GATHERING: No coins with price increase >= {PRICE_INCREASE_THRESHOLD}% and volume >= €{MIN_VOLUME_EUR}{RESET}"
         )
 
     below_threshold = percent_changes[
@@ -147,7 +148,7 @@ def verify_and_analyze_data(df, price_monitor_manager):
         top_5_below = below_threshold.sort_values(
             by="percent_change", ascending=False
         ).head(5)
-        logger.info(f"\nTop 5 coins with price increase < {PRICE_INCREASE_THRESHOLD}%:")
+        logger.info(f"{BRIGHT_BLUE}DATA GATHERING: Top 5 coins with price increase < {PRICE_INCREASE_THRESHOLD}%:{RESET}")
         for _, row in top_5_below.iterrows():
 
             # Calculate order book metrics for top 5 below threshold
@@ -157,7 +158,7 @@ def verify_and_analyze_data(df, price_monitor_manager):
                 check_rate_limit(1)
                 metrics = calculate_order_book_metrics(
                     market=symbol.replace("/", "-"),
-                    amount_quote=AMOUNT_QUOTE,
+                    amount_quote=portfolio['cash'] * ALLOCATION_PER_TRADE,
                     price_range_percent=PRICE_RANGE_PERCENT,
                 )
                 metrics["bought"] = False
@@ -167,8 +168,8 @@ def verify_and_analyze_data(df, price_monitor_manager):
                 f"Symbol: {colorize_value(row['symbol'], 'symbol')}  "
                 f"Change: {colorize_value(row['percent_change'], 'percent_change')}  "
                 f"Volume: {colorize_value(row['volume_eur'], 'volume_eur')}  "
-                f"Open: {row['open_price']:>12.8f}  "
-                f"Close: {row['close_price']:>12.8f}  "
+                f"Open: {row['open_price']:>15.8f}  "
+                f"Close: {row['close_price']:>15.8f}  "
                 f"Slippage Buy: {colorize_value(metrics['slippage_buy'], 'slippage_buy')}  "
                 f"Slippage Sell: {colorize_value(metrics['slippage_sell'], 'slippage_sell')}  "
                 f"Total Score: {metrics['total_score']:>4.2f}  "

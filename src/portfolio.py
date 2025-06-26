@@ -10,11 +10,11 @@ import pandas as pd
 
 from .config import (ADJUSTED_PROFIT_TARGET, ALLOCATION_PER_TRADE,
                      ASSET_THRESHOLD, BUY_FEE, CAT_LOSS_THRESHOLD,
-                     FINISHED_TRADES_CSV, MAX_ACTIVE_ASSETS,
+                     FINISHED_TRADES_CSV, MAX_ACTIVE_ASSETS, MIN_TOTAL_SCORE,
                      MIN_HOLDING_MINUTES, MOMENTUM_CONFIRM_MINUTES,
                      MOMENTUM_THRESHOLD, PORTFOLIO_FILE, PORTFOLIO_VALUE,
                      PROFIT_TARGET, PROFIT_TARGET_MULTIPLIER, SELL_FEE,
-                     TIME_STOP_MINUTES, TRAILING_STOP_FACTOR,
+                     TIME_STOP_MINUTES, TRAILING_STOP_FACTOR, MAX_SLIPPAGE_BUY,
                      TRAILING_STOP_FACTOR_EARLY, logger)
 from .exchange import fetch_ticker_price, fetch_trade_details
 from .state import (low_volatility_assets, negative_momentum_counts, portfolio,
@@ -186,7 +186,7 @@ def save_portfolio():
         )
         with open(backup_file, "w") as f:
             json.dump(portfolio_copy, f, indent=4)
-        logger.info(f"Saved portfolio to {PORTFOLIO_FILE} and backup {backup_file}")
+        # logger.info(f"Saved portfolio to {PORTFOLIO_FILE} and backup {backup_file}")
 
         # Manage backup files: keep only the 3 latest
         backup_files = glob.glob(f"{PORTFOLIO_FILE}.backup_*")
@@ -223,9 +223,9 @@ def manage_portfolio(
 
     current_time = datetime.utcnow()
     five_min_ago = current_time - timedelta(minutes=5)
-    logger.info(
-        f"Portfolio before update: Cash = {portfolio['cash']:.2f} EUR, Assets = {len(portfolio['assets'])}"
-    )
+    # logger.info(
+    #     f"Portfolio before update: Cash = {portfolio['cash']:.2f} EUR, Assets = {len(portfolio['assets'])}"
+    # )
     finished_trades = []
     total_asset_value = 0.0
     skipped_assets = []
@@ -472,11 +472,19 @@ def manage_portfolio(
             # Buy new assets and update order book metrics
             for record in above_threshold_data:
                 symbol = record["symbol"]
+                total_score = 0.0
+                slippage_buy = 0.0
+                for metrics in order_book_metrics_list:
+                    if metrics.get("market") == symbol.replace("/", "-"):
+                        total_score = metrics.get("total_score")
+                        slippage_buy = metrics.get("slippage_buy")
                 if (
                     symbol not in portfolio["assets"]
                     and portfolio["cash"] >= PORTFOLIO_VALUE * ALLOCATION_PER_TRADE
                     and len(portfolio["assets"]) < MAX_ACTIVE_ASSETS
                     and symbol not in low_volatility_assets
+                    and total_score >= MIN_TOTAL_SCORE
+                    and slippage_buy <= MAX_SLIPPAGE_BUY
                 ):
                     purchase_price = record["close_price"]
                     allocation = PORTFOLIO_VALUE * ALLOCATION_PER_TRADE
@@ -533,6 +541,14 @@ def manage_portfolio(
                             price_monitor_manager=price_monitor_manager,
                         )
                     )
+                elif slippage_buy >= MAX_SLIPPAGE_BUY:
+                    logger.info(
+                        f"Cannot buy {symbol}: Slippage Buy {slippage_buy:.2f}% is above threshold ({MAX_SLIPPAGE_BUY:.2f}%)."
+                    )
+                elif total_score <= MIN_TOTAL_SCORE:
+                    logger.info(
+                        f"Cannot buy {symbol}: Total Score {total_score:.2f} is below threshold {MIN_TOTAL_SCORE:.2f}."
+                    )
                 elif symbol in portfolio["assets"]:
                     logger.debug(f"Cannot buy {symbol}: Already owned.")
                 elif symbol in low_volatility_assets:
@@ -554,6 +570,6 @@ def manage_portfolio(
         logger.info(
             f"Portfolio value may be inaccurate due to missing prices for: {', '.join(skipped_assets)}"
         )
-    logger.info(
-        f"Portfolio: Cash: {portfolio['cash']:.2f} EUR, Assets: {len(portfolio['assets'])}, Total Value: {total_portfolio_value:.2f} EUR"
-    )
+    # logger.info(
+    #     f"Portfolio: Cash: {portfolio['cash']:.2f} EUR, Assets: {len(portfolio['assets'])}, Total Value: {total_portfolio_value:.2f} EUR"
+    # )

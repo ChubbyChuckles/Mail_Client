@@ -292,8 +292,8 @@ def append_to_order_book_metrics_csv(metrics_list):
                     "Error": metrics.get("error"),
                 }
                 writer.writerow(row)
-        logger.info(
-            f"Appended {len(metrics_list)} order book metrics to {ORDER_BOOK_METRICS_CSV}"
-        )
+        # logger.info(
+        #     f"Appended {len(metrics_list)} order book metrics to {ORDER_BOOK_METRICS_CSV}"
+        # )
     except Exception as e:
         logger.error(f"Error appending to {ORDER_BOOK_METRICS_CSV}: {e}")

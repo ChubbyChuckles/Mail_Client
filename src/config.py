@@ -101,9 +101,9 @@ AMOUNT_QUOTE = parse_float_env("AMOUNT_QUOTE", 5.5)  # EUR amount for slippage
 PRICE_RANGE_PERCENT = parse_float_env(
     "PRICE_RANGE_PERCENT", 10.0
 )  # Price range for depth
-MAX_SLIPPAGE_BUY=float(os.getenv("MAX_SLIPPAGE_BUY", 0.05)) # Maximum slippage for buy orders
-MAX_SLIPPAGE_SELL=float(os.getenv("MAX_SLIPPAGE_SELL", -0.05)) # Maximum slippage for sell orders
-MIN_TOTAL_SCORE=float(os.getenv("MIN_TOTAL_SCORE", 0.7)) # Minimum total score for buy decisions
+MAX_SLIPPAGE_BUY=parse_float_env("MAX_SLIPPAGE_BUY", 0.05) # Maximum slippage for buy orders
+MAX_SLIPPAGE_SELL=parse_float_env("MAX_SLIPPAGE_SELL", -0.05) # Maximum slippage for sell orders
+MIN_TOTAL_SCORE=parse_float_env("MIN_TOTAL_SCORE", 0.7) # Minimum total score for buy decisions
 
 
 # Validate MAX_ACTIVE_ASSETS
