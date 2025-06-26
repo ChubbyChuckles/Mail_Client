@@ -2,37 +2,119 @@ name: CI
 
 on:
   push:
-    branches: [ main ]
+    branches:
+      - main
   pull_request:
-    branches: [ main ]
+    branches:
+      - main
 
 jobs:
   test:
+    name: Test and Lint (Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ['3.10.9', '3.11', '3.12'] # Test across multiple Python versions
+      fail-fast: false # Allow all matrix jobs to run even if one fails
     steps:
-    - uses: actions/checkout@v3
-    - name: Set up Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: '3.10.9'
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install -r requirements.txt
-        pip install black isort
-    - name: Check code formatting with black
-      run: |
-        black --check . || true
-      continue-on-error: true
-    - name: Check code formatting with isort
-      run: |
-        isort --check-only --diff . || true
-      continue-on-error: true
-    - name: Format code with black
-      run: |
-        black .
-    - name: Format code with isort
-      run: |
-        isort .
-    - name: Run tests
-      run: pytest
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # Fetch full history for proper linting and versioning
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Cache pip dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ matrix.python-version }}-${{ hashFiles('requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-${{ matrix.python-version }}-
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest pytest-mock black isort
+        continue-on-error: false # Fail on dependency installation errors
+
+      - name: Print environment details
+        run: |
+          python --version
+          pip list
+          pwd
+          ls -R
+        shell: bash
+
+      - name: Check code formatting with black
+        run: black --check --diff .
+        continue-on-error: false # Fail if formatting check fails
+
+      - name: Check code formatting with isort
+        run: isort --check-only --diff .
+        continue-on-error: false # Fail if import sorting check fails
+
+      - name: Format code with black
+        if: github.event_name == 'pull_request' # Only format on PRs
+        run: black .
+        continue-on-error: true # Allow formatting to fail without stopping CI
+
+      - name: Format code with isort
+        if: github.event_name == 'pull_request' # Only format on PRs
+        run: isort .
+        continue-on-error: true # Allow formatting to fail without stopping CI
+
+      - name: Commit formatting changes
+        if: github.event_name == 'pull_request'
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: Apply black and isort formatting
+          file_pattern: '*.py'
+          branch: ${{ github.head_ref }}
+          skip_fetch: true
+
+      - name: Run tests
+        run: pytest -v --capture=sys tests/
+        env:
+          PYTEST_ADDOPTS: --log-cli-level=DEBUG # Enable debug logging
+        continue-on-error: false # Fail if tests fail
+
+      - name: Upload test logs
+        if: always() # Run even if tests fail
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-logs-${{ matrix.python-version }}
+          path: |
+            *.log
+            pytest*.log
+          retention-days: 7
+
+  lint-only:
+    name: Lint Only
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request' # Run only on PRs
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10.9'
+
+      - name: Install linters
+        run: |
+          python -m pip install --upgrade pip
+          pip install black isort
+
+      - name: Check code formatting with black
+        run: black --check --diff .
+        continue-on-error: false
+
+      - name: Check code formatting with isort
+        run: isort --check-only --diff .
+        continue-on-error: false
