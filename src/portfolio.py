@@ -37,6 +37,7 @@ def sell_asset(
     """
     Sells a specified asset and updates the portfolio.
     """
+   
     try:
         logger.debug(f"Starting sell process for {symbol}: {reason}")
         finished_trade = None

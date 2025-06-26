@@ -4,7 +4,7 @@ from datetime import datetime, timedelta
 import pandas as pd
 
 from .bitvavo_order_metrics import calculate_order_book_metrics
-from .config import (AMOUNT_QUOTE, MIN_VOLUME_EUR, PRICE_INCREASE_THRESHOLD, MAX_SLIPPAGE_BUY, MAX_SLIPPAGE_SELL, ALLOCATION_PER_TRADE, MIN_TOTAL_SCORE,
+from .config import (MIN_VOLUME_EUR, PRICE_INCREASE_THRESHOLD, MAX_SLIPPAGE_BUY, MAX_SLIPPAGE_SELL, ALLOCATION_PER_TRADE, MIN_TOTAL_SCORE,
                      PRICE_RANGE_PERCENT, logger)
 from .exchange import check_rate_limit, semaphore
 from .state import low_volatility_assets, portfolio, portfolio_lock
@@ -61,6 +61,7 @@ def verify_and_analyze_data(df, price_monitor_manager):
             - percent_changes (pandas.DataFrame): DataFrame with price changes and OHLCV data.
             - order_book_metrics_list (list): List of order book metrics for relevant coins.
     """
+    
     if df.empty:
         logger.warning("Input DataFrame is empty.")
         return [], pd.DataFrame(), []
@@ -138,7 +139,7 @@ def verify_and_analyze_data(df, price_monitor_manager):
 
     else:
         logger.info(
-            f"{BRIGHT_BLUE}DATA GATHERING: No coins with price increase >= {PRICE_INCREASE_THRESHOLD}% and volume >= €{MIN_VOLUME_EUR}{RESET}"
+            f"{BRIGHT_BLUE}DATA GATHERING: No coins with price increase >= {PRICE_INCREASE_THRESHOLD}% and trade volume >= {MIN_VOLUME_EUR} €   (only Buy if Total Score > {MIN_TOTAL_SCORE} and Slippage Buy < {MAX_SLIPPAGE_BUY}%){RESET}{RESET}"
         )
 
     below_threshold = percent_changes[
@@ -148,7 +149,7 @@ def verify_and_analyze_data(df, price_monitor_manager):
         top_5_below = below_threshold.sort_values(
             by="percent_change", ascending=False
         ).head(5)
-        logger.info(f"{BRIGHT_BLUE}DATA GATHERING: Top 5 coins with price increase < {PRICE_INCREASE_THRESHOLD}%:{RESET}")
+        logger.info(f"{BRIGHT_BLUE}DATA GATHERING: Top 5 coins with price increase < {PRICE_INCREASE_THRESHOLD}% or trade volume < {MIN_VOLUME_EUR} €:{RESET}")
         for _, row in top_5_below.iterrows():
 
             # Calculate order book metrics for top 5 below threshold
