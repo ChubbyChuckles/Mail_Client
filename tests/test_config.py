@@ -8,7 +8,7 @@ from src.config import EvaluationLogHandler
 
 from src.config import (
     logger, parse_float_env, MAX_ACTIVE_ASSETS, ASSET_THRESHOLD,
-    API_KEY, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, AMOUNT_QUOTE, PRICE_RANGE_PERCENT
+    API_KEY, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, PRICE_RANGE_PERCENT
 )
 
 # Fixture to reset logging handlers before each test

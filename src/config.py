@@ -75,31 +75,31 @@ API_KEY = os.getenv("BITVAVO_API_KEY")
 API_SECRET = os.getenv("BITVAVO_API_SECRET")
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
-CONCURRENT_REQUESTS = int(os.getenv("CONCURRENT_REQUESTS", 30))
+CONCURRENT_REQUESTS = int(os.getenv("CONCURRENT_REQUESTS", 10)) # trade related
 RATE_LIMIT_WEIGHT = int(os.getenv("RATE_LIMIT_WEIGHT", 1000))
 CANDLE_LIMIT = int(os.getenv("CANDLE_LIMIT", 10))
 CANDLE_TIMEFRAME = os.getenv("CANDLE_TIMEFRAME", "1m")
 RESULTS_FOLDER = os.getenv("RESULTS_FOLDER", "data_1m_pq_alot")
 PARQUET_FILENAME = os.getenv("PARQUET_FILENAME", "bitvavo_1min_candles_eur.parquet")
-PRICE_INCREASE_THRESHOLD = float(os.getenv("PRICE_INCREASE_THRESHOLD", 1.0))
-MIN_VOLUME_EUR = float(os.getenv("MIN_VOLUME_EUR", 10000))
-PORTFOLIO_VALUE = float(os.getenv("PORTFOLIO_VALUE", 10000))
-ALLOCATION_PER_TRADE = float(os.getenv("ALLOCATION_PER_TRADE", 0.1))
-BUY_FEE = float(os.getenv("BUY_FEE", 0.0015))
-SELL_FEE = float(os.getenv("SELL_FEE", 0.0025))
-TRAILING_STOP_FACTOR = float(os.getenv("TRAILING_STOP_FACTOR", 1.0))
-TRAILING_STOP_FACTOR_EARLY = float(os.getenv("TRAILING_STOP_FACTOR_EARLY", 1.5))
-ADJUSTED_PROFIT_TARGET = float(os.getenv("ADJUSTED_PROFIT_TARGET", 0.015))
-PROFIT_TARGET = float(os.getenv("PROFIT_TARGET", 0.05))
-MIN_HOLDING_MINUTES = float(os.getenv("MIN_HOLDING_MINUTES", 5))
-TIME_STOP_MINUTES = int(os.getenv("TIME_STOP_MINUTES", 30))
-CAT_LOSS_THRESHOLD = float(os.getenv("CAT_LOSS_THRESHOLD", -0.08))
-MOMENTUM_CONFIRM_MINUTES = int(os.getenv("MOMENTUM_CONFIRM_MINUTES", 3))
-MOMENTUM_THRESHOLD = float(os.getenv("MOMENTUM_THRESHOLD", -0.25))
+PRICE_INCREASE_THRESHOLD = float(os.getenv("PRICE_INCREASE_THRESHOLD", 1.0)) # trade related
+MIN_VOLUME_EUR = float(os.getenv("MIN_VOLUME_EUR", 10000)) # trade related
+PORTFOLIO_VALUE = float(os.getenv("PORTFOLIO_VALUE", 10000)) # trade related
+ALLOCATION_PER_TRADE = float(os.getenv("ALLOCATION_PER_TRADE", 0.1)) # trade related
+BUY_FEE = float(os.getenv("BUY_FEE", 0.0015)) # trade related
+SELL_FEE = float(os.getenv("SELL_FEE", 0.0025)) # trade related
+TRAILING_STOP_FACTOR = float(os.getenv("TRAILING_STOP_FACTOR", 1.0)) # trade related
+TRAILING_STOP_FACTOR_EARLY = float(os.getenv("TRAILING_STOP_FACTOR_EARLY", 1.5)) # trade related
+ADJUSTED_PROFIT_TARGET = float(os.getenv("ADJUSTED_PROFIT_TARGET", 0.015)) # trade related
+PROFIT_TARGET = float(os.getenv("PROFIT_TARGET", 0.05)) # trade related
+MIN_HOLDING_MINUTES = float(os.getenv("MIN_HOLDING_MINUTES", 5)) # trade related
+TIME_STOP_MINUTES = int(os.getenv("TIME_STOP_MINUTES", 90)) # trade related
+CAT_LOSS_THRESHOLD = float(os.getenv("CAT_LOSS_THRESHOLD", -0.08)) # trade related
+MOMENTUM_CONFIRM_MINUTES = int(os.getenv("MOMENTUM_CONFIRM_MINUTES", 3)) # trade related
+MOMENTUM_THRESHOLD = float(os.getenv("MOMENTUM_THRESHOLD", -0.25)) # trade related
 PORTFOLIO_FILE = os.getenv("PORTFOLIO_FILE", "portfolio.json")
-LOOP_INTERVAL_SECONDS = int(os.getenv("LOOP_INTERVAL_SECONDS", 70))
-MAX_ACTIVE_ASSETS = int(os.getenv("MAX_ACTIVE_ASSETS", 20))
-ASSET_THRESHOLD = int(MAX_ACTIVE_ASSETS * 0.6)
+LOOP_INTERVAL_SECONDS = int(os.getenv("LOOP_INTERVAL_SECONDS", 60))
+MAX_ACTIVE_ASSETS = int(os.getenv("MAX_ACTIVE_ASSETS", 7)) #  trade related
+ASSET_THRESHOLD = int(MAX_ACTIVE_ASSETS * 0.6) # trade related
 INACTIVITY_TIMEOUT = int(os.getenv("INACTIVITY_TIMEOUT", 20))
 PROFIT_TARGET_MULTIPLIER = float(os.getenv("PROFIT_TARGET_MULTIPLIER", 2.0))
 BUY_TRADES_CSV = os.getenv("BUY_TRADES_CSV", "buy_trades.csv")
@@ -109,9 +109,9 @@ AMOUNT_QUOTE = parse_float_env("AMOUNT_QUOTE", 5.5)  # EUR amount for slippage
 PRICE_RANGE_PERCENT = parse_float_env(
     "PRICE_RANGE_PERCENT", 10.0
 )  # Price range for depth
-MAX_SLIPPAGE_BUY=parse_float_env("MAX_SLIPPAGE_BUY", 0.05) # Maximum slippage for buy orders
-MAX_SLIPPAGE_SELL=parse_float_env("MAX_SLIPPAGE_SELL", -0.05) # Maximum slippage for sell orders
-MIN_TOTAL_SCORE=parse_float_env("MIN_TOTAL_SCORE", 0.7) # Minimum total score for buy decisions
+MAX_SLIPPAGE_BUY=parse_float_env("MAX_SLIPPAGE_BUY", 0.05) # Maximum slippage for buy orders (trade related)
+MAX_SLIPPAGE_SELL=parse_float_env("MAX_SLIPPAGE_SELL", -0.05) # Maximum slippage for sell orders (trade related)
+MIN_TOTAL_SCORE=parse_float_env("MIN_TOTAL_SCORE", 0.7) # Minimum total score for buy decisions (trade related)
 
 
 # Validate MAX_ACTIVE_ASSETS
@@ -119,7 +119,7 @@ if MAX_ACTIVE_ASSETS < 1:
     logger.warning(
         f"MAX_ACTIVE_ASSETS is {MAX_ACTIVE_ASSETS}, must be >= 1. Setting to 20."
     )
-    MAX_ACTIVE_ASSETS = 20
+    MAX_ACTIVE_ASSETS = 7
     ASSET_THRESHOLD = int(MAX_ACTIVE_ASSETS * 0.6)
 
 # Warn if Telegram credentials are missing

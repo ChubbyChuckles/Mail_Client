@@ -20,6 +20,7 @@ from .state import (ban_expiry_time, is_banned, low_volatility_assets,
 from .storage import save_to_local
 from miscellaneous.print_assets import print_portfolio
 from miscellaneous.clean_up import garbage_collection
+from miscellaneous.print_trade_variables import print_trade_variables
 
 last_cycle_time = time.time()
 GREEN = "\033[32m"
@@ -85,6 +86,7 @@ def main():
         logger.info(
             f"{GREEN}{'=' * 256}{RESET}"
         )
+        print_trade_variables(vars_per_line=7, total_line_width=256)
         garbage_collection()
         # logger.info("Cleaning up old files...")
         markets = bitvavo.load_markets()
@@ -97,6 +99,7 @@ def main():
         
 
         while True:
+            
             global last_cycle_time
             last_cycle_time = time.time()
             all_data = []
