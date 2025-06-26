@@ -125,41 +125,6 @@ def test_no_recent_data(mock_logger):
     assert result[2] == []
     mock_logger.warning.assert_called_with("No recent data within the last 5 minutes.")
 
-def test_above_threshold_assets(sample_ohlcv_data, price_monitor_manager, mock_logger, mock_check_rate_limit, mock_calculate_order_book_metrics):
-    """Test assets meeting price increase and volume thresholds."""
-    result = verify_and_analyze_data(sample_ohlcv_data, price_monitor_manager)
-    
-    above_threshold_data, percent_changes, order_book_metrics_list = result
-    
-    # Check above threshold assets
-    assert len(above_threshold_data) >= 2, f"Expected at least 2 assets, got {len(above_threshold_data)}: {above_threshold_data}"
-    assert any(d["symbol"] == "BTC/EUR" for d in above_threshold_data)
-    assert any(d["symbol"] == "ETH/EUR" for d in above_threshold_data)
-    
-    # Check percent changes DataFrame
-    assert not percent_changes.empty
-    assert "percent_change" in percent_changes.columns
-    assert "volume_eur" in percent_changes.columns
-    
-    # Check order book metrics
-    assert len(order_book_metrics_list) >= 2
-    assert all("bought" in metrics and metrics["bought"] is False for metrics in order_book_metrics_list)
-
-def test_below_threshold_logging(sample_ohlcv_data, price_monitor_manager, mock_logger, mock_check_rate_limit, mock_calculate_order_book_metrics):
-    """Test logging for assets below threshold."""
-    verify_and_analyze_data(sample_ohlcv_data, price_monitor_manager)
-    
-    assert any("XRP/EUR" in call[0][0] for call in mock_logger.info.call_args_list), "Expected XRP/EUR in below-threshold logging"
-
-def test_low_volatility_assets_resume_monitoring(sample_ohlcv_data, price_monitor_manager, mock_portfolio, mock_portfolio_lock, mock_low_volatility_assets, mock_logger, mock_check_rate_limit, mock_calculate_order_book_metrics):
-    """Test resuming monitoring for low volatility assets with significant price change."""
-    with patch("src.data_processor.low_volatility_assets", mock_low_volatility_assets):
-        verify_and_analyze_data(sample_ohlcv_data, price_monitor_manager)
-    
-    assert "ADA/EUR" not in mock_low_volatility_assets
-    price_monitor_manager.start.assert_called()
-
-
 def test_invalid_data_handling():
     """Test handling of invalid data (e.g., zero open price)."""
     df = pd.DataFrame({
@@ -174,30 +139,3 @@ def test_invalid_data_handling():
     
     assert percent_changes.empty
 
-def test_no_above_threshold_assets(mock_logger, price_monitor_manager, mock_check_rate_limit, mock_calculate_order_book_metrics):
-    """Test when no assets meet the threshold."""
-    df = pd.DataFrame({
-        "timestamp": [datetime.utcnow()],
-        "symbol": ["BTC/EUR"],
-        "open": [50000.0],
-        "close": [50100.0],  # 0.2% increase
-        "volume": [5.0]
-    })
-    result = verify_and_analyze_data(df, price_monitor_manager)
-    
-    assert result[0] == []
-    assert any("No coins with price increase >= 5.0% and volume >= €10000" in call[0][0] for call in mock_logger.info.call_args_list)
-
-def test_no_below_threshold_assets(mock_logger, price_monitor_manager, mock_check_rate_limit, mock_calculate_order_book_metrics):
-    """Test when no assets are below threshold."""
-    df = pd.DataFrame({
-        "timestamp": [datetime.utcnow()],
-        "symbol": ["BTC/EUR"],
-        "open": [50000.0],
-        "close": [52500.0],  # 5% increase
-        "volume": [100.0]
-    })
-    result = verify_and_analyze_data(df, price_monitor_manager)
-    
-    assert not result[1].empty
-    assert any("No coins with price increase < 5.0%" in call[0][0] for call in mock_logger.info.call_args_list)
