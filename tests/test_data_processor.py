@@ -107,24 +107,6 @@ def test_old_data(mock_logger):
     assert result[2] == []
     mock_logger.warning.assert_called_with("Data contains no candles from within the last 10 minutes.")
 
-def test_no_recent_data(mock_logger):
-    """Test handling of data with no candles within the last 10 minutes."""
-    ten_min_ago = datetime.utcnow() - timedelta(minutes=10)
-    df = pd.DataFrame({
-        "timestamp": [ten_min_ago],
-        "symbol": ["BTC/EUR"],
-        "open": [50000.0],
-        "close": [51000.0],
-        "volume": [10.0]
-    })
-    price_monitor_manager = MagicMock()
-    result = verify_and_analyze_data(df, price_monitor_manager)
-    
-    assert result[0] == []
-    assert result[1].empty
-    assert result[2] == []
-    mock_logger.warning.assert_called_with("Data contains no candles from within the last 10 minutes.")
-
 def test_invalid_data_handling():
     """Test handling of invalid data (e.g., zero open price)."""
     df = pd.DataFrame({

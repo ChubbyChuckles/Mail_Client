@@ -1,6 +1,7 @@
 import logging
 import os
 import sys
+import io
 from datetime import datetime
 
 from dotenv import load_dotenv
@@ -46,7 +47,13 @@ logger.addHandler(evaluation_handler)
 
 # Ensure unbuffered output
 os.environ["PYTHONUNBUFFERED"] = "1"
-sys.stdout = os.fdopen(sys.stdout.fileno(), "w", buffering=1)
+try:
+    if sys.stdout.fileno():  # Check if fileno() is supported
+        sys.stdout = os.fdopen(sys.stdout.fileno(), "w", buffering=1)
+except (AttributeError, OSError, io.UnsupportedOperation):
+    # Fallback: keep sys.stdout as is or set to line-buffered mode if possible
+    if hasattr(sys.stdout, 'reconfigure'):
+        sys.stdout.reconfigure(line_buffering=True)
 
 # Load environment variables
 load_dotenv()
