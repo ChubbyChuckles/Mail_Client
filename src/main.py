@@ -26,6 +26,15 @@ last_cycle_time = time.time()
 GREEN = "\033[32m"
 RESET = "\033[0m"
 
+from .telegram_notifications import TelegramNotifier
+import asyncio
+
+telegram_notifier = TelegramNotifier(
+    bot_token=config.config.TELEGRAM_BOT_TOKEN,
+    chat_id=config.config.TELEGRAM_CHAT_ID
+)
+asyncio.run_coroutine_threadsafe(telegram_notifier.start(), asyncio.get_event_loop())
+
 def watchdog(price_monitor_manager):
     global last_cycle_time
     while True:
@@ -321,6 +330,10 @@ def main():
     except KeyboardInterrupt:
         logger.info("Received shutdown signal. Initiating graceful shutdown...")
         try:
+            asyncio.run_coroutine_threadsafe(telegram_notifier.stop(), asyncio.get_event_loop())
+        except Exception as e:
+            logger.error(f"Error stopping Telegram notifier during shutdown: {e}", exc_info=True)
+        try:
             price_monitor_manager.stop_all()
         except Exception as e:
             logger.error(f"Error stopping price monitors during shutdown: {e}", exc_info=True)
@@ -341,7 +354,7 @@ def main():
         time.sleep(60)
 
 def send_alert(subject, message):
-    logger.error(f"ALERT: {subject} - {message}")
+    telegram_notifier.notify_error(subject, message)
 
 if __name__ == "__main__":
     main()

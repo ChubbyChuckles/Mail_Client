@@ -17,6 +17,17 @@ from .state import low_volatility_assets, negative_momentum_counts, portfolio, p
 from .utils import append_to_buy_trades_csv, append_to_finished_trades_csv, append_to_order_book_metrics_csv, calculate_dynamic_ema_period, calculate_ema
 from .bitvavo_order_metrics import calculate_order_book_metrics, fetch_order_book_with_retry
 
+from .telegram_notifications import TelegramNotifier
+import asyncio
+
+portfolio_values = []  # At the top of portfolio.py
+
+telegram_notifier = TelegramNotifier(
+    bot_token=config.config.TELEGRAM_BOT_TOKEN,
+    chat_id=config.config.TELEGRAM_CHAT_ID
+)
+asyncio.run_coroutine_threadsafe(telegram_notifier.start(), asyncio.get_event_loop())
+
 @retry(
     stop=stop_after_attempt(3),
     wait=wait_exponential(multiplier=1, min=4, max=60),
@@ -139,6 +150,7 @@ def sell_asset(
             else:
                 logger.warning(f"Price monitor manager is None for {symbol}. Cannot stop monitoring.")
             append_to_finished_trades_csv(finished_trade)
+            telegram_notifier.notify_sell_trade(finished_trade)
         except Exception as e:
             logger.error(f"Failed to process post-sale actions for {symbol}: {e}", exc_info=True)
             send_alert("Post-Sale Action Failure", f"Failed to process post-sale actions for {symbol}: {e}")
@@ -524,9 +536,11 @@ def manage_portfolio(
                     negative_momentum_counts[symbol] = negative_momentum_counts.get(symbol, 0) + 1
                 else:
                     negative_momentum_counts[symbol] = 0
+                buy_fee = asset.get("buy_fee", 0)  # Get buy fee, default to 0 if not present
+                total_cost = purchase_price * asset["quantity"] + buy_fee
                 unrealized_profit = (
-                    (current_price - purchase_price) / purchase_price
-                    if purchase_price > 0
+                    ((current_price * asset["quantity"]) - total_cost) / total_cost
+                    if total_cost > 0
                     else 0
                 )
                 trailing_loss = (
@@ -625,10 +639,21 @@ def manage_portfolio(
                 symbol = record["symbol"]
                 total_score = 0.0
                 slippage_buy = 0.0
+                metrics_found = False
                 for metrics in order_book_metrics_list:
                     if metrics.get("market") == symbol.replace("/", "-"):
                         total_score = metrics.get("total_score", 0)
-                        slippage_buy = metrics.get("slippage_buy", float("inf"))  # Positive percentage (e.g., 0.1 for 0.1%)
+                        slippage_buy = metrics.get("slippage_buy", float("inf"))
+                        metrics_found = True
+                if not metrics_found:
+                    logger.warning(f"No matching metrics found for {symbol} in order_book_metrics_list")
+                    continue
+                logger.debug(f"Evaluating buy for {symbol}: cash={portfolio.get('cash', 0):.2f}, "
+                            f"required_cash={config.config.PORTFOLIO_VALUE * config.config.ALLOCATION_PER_TRADE:.2f}, "
+                            f"assets={len(portfolio.get('assets', {}))}, max_assets={config.config.MAX_ACTIVE_ASSETS}, "
+                            f"low_volatility={symbol in low_volatility_assets}, "
+                            f"total_score={total_score:.2f}, min_score={config.config.MIN_TOTAL_SCORE:.2f}, "
+                            f"slippage_buy={slippage_buy:.3f}%, max_slippage={config.config.MAX_SLIPPAGE_BUY:.3f}%")
                 if (
                     symbol not in portfolio.get("assets", {})
                     and portfolio.get("cash", 0) >= config.config.PORTFOLIO_VALUE * config.config.ALLOCATION_PER_TRADE
@@ -638,11 +663,14 @@ def manage_portfolio(
                     and slippage_buy <= config.config.MAX_SLIPPAGE_BUY
                 ):
                     close_price = record["close_price"]
-                    purchase_price = close_price * (1 + slippage_buy)  # Convert positive percentage to decimal
+                    purchase_price = close_price * (1 + slippage_buy / 100)
                     allocation = config.config.PORTFOLIO_VALUE * config.config.ALLOCATION_PER_TRADE
                     buy_fee = allocation * config.config.BUY_FEE
                     net_allocation = allocation - buy_fee
                     quantity = net_allocation / purchase_price if purchase_price > 0 else 0
+                    logger.debug(f"Buy calc for {symbol}: close_price={close_price:.4f}, purchase_price={purchase_price:.4f}, "
+                                f"allocation={allocation:.2f}, buy_fee={buy_fee:.2f}, net_allocation={net_allocation:.2f}, "
+                                f"quantity={quantity:.4f}")
                     if quantity <= 0:
                         logger.warning(f"Cannot buy {symbol}: Invalid quantity {quantity}")
                         continue
@@ -667,11 +695,13 @@ def manage_portfolio(
                         "Largest Trade Volume EUR": f"{largest_trade_volume_eur:.2f}",
                     }
                     append_to_buy_trades_csv(buy_trade_data)
+                    telegram_notifier.notify_buy_trade(buy_trade_data)
                     portfolio["assets"][symbol] = {
                         "quantity": quantity,
                         "purchase_price": purchase_price,
                         "purchase_time": current_time,
                         "buy_slippage": slippage_buy,  # Store positive percentage
+                        "buy_fee": buy_fee,  # Add this line
                         "highest_price": purchase_price,
                         "current_price": close_price,  # Use close_price for current valuation
                         "profit_target": config.config.PROFIT_TARGET,
@@ -718,9 +748,13 @@ def manage_portfolio(
                 elif symbol in low_volatility_assets:
                     logger.debug(f"Cannot buy {symbol}: Marked as low volatility.")
                 else:
-                    logger.warning(
-                        f"Cannot buy {symbol}: Insufficient cash ({portfolio.get('cash', 0):.2f} EUR)."
-                    )
+                    logger.info(f"Cannot buy {symbol}: Conditions not met - "
+                    f"in_portfolio={symbol in portfolio.get('assets', {})}, "
+                    f"sufficient_cash={portfolio.get('cash', 0) >= config.config.PORTFOLIO_VALUE * config.config.ALLOCATION_PER_TRADE}, "
+                    f"asset_limit={len(portfolio.get('assets', {})) < config.config.MAX_ACTIVE_ASSETS}, "
+                    f"low_volatility={symbol in low_volatility_assets}, "
+                    f"total_score={total_score:.2f} >= {config.config.MIN_TOTAL_SCORE}, "
+                    f"slippage_buy={slippage_buy:.3f}% <= {config.config.MAX_SLIPPAGE_BUY}%")
         finally:
             portfolio_lock.release()
     except ValueError as e:
@@ -741,6 +775,7 @@ def manage_portfolio(
         send_alert("Order Book Metrics Save Failure", f"Error saving order book metrics: {e}")
 
     total_portfolio_value = portfolio.get("cash", 0) + total_asset_value
+    portfolio_values.append({"timestamp": datetime.utcnow().isoformat(), "portfolio_value": total_portfolio_value})
     if skipped_assets:
         logger.warning(
             f"Portfolio value may be inaccurate due to missing prices for: {', '.join(skipped_assets)}"
@@ -748,6 +783,40 @@ def manage_portfolio(
     logger.info(
         f"Portfolio: Cash: {portfolio.get('cash', 0):.2f} EUR, Assets: {len(portfolio.get('assets', {}))}, Total Value: {total_portfolio_value:.2f} EUR"
     )
+    # Add these notification calls here
+    if not hasattr(telegram_notifier, 'last_summary_time') or \
+    (datetime.utcnow() - telegram_notifier.last_summary_time).total_seconds() >= 3600:
+        telegram_notifier.notify_portfolio_summary(portfolio)
+        telegram_notifier.last_summary_time = datetime.utcnow()
+
+    if (datetime.utcnow() - getattr(telegram_notifier, 'last_pinned_time', datetime.utcnow())).total_seconds() >= 60:
+        asyncio.run_coroutine_threadsafe(
+            telegram_notifier.update_pinned_summary(portfolio),
+            asyncio.get_event_loop()
+        )
+        telegram_notifier.last_pinned_time = datetime.utcnow()
+
+    if (datetime.utcnow() - getattr(telegram_notifier, 'last_chart_time', datetime.utcnow())).total_seconds() >= 86400:
+        asyncio.run_coroutine_threadsafe(
+            telegram_notifier.notify_performance_chart(portfolio_values),
+            asyncio.get_event_loop()
+        )
+        telegram_notifier.last_chart_time = datetime.utcnow()
+
+    if (datetime.utcnow() - getattr(telegram_notifier, 'last_allocation_time', datetime.utcnow())).total_seconds() >= 86400:
+        asyncio.run_coroutine_threadsafe(
+            telegram_notifier.notify_asset_allocation(portfolio),
+            asyncio.get_event_loop()
+        )
+        telegram_notifier.last_allocation_time = datetime.utcnow()
+
+    if datetime.utcnow().hour == 0 and (not hasattr(telegram_notifier, 'last_report_date') or \
+    datetime.utcnow().date() != telegram_notifier.last_report_date):
+        asyncio.run_coroutine_threadsafe(
+            telegram_notifier.notify_daily_report(),
+            asyncio.get_event_loop()
+        )
+        telegram_notifier.last_report_date = datetime.utcnow().date()
 
 def send_alert(subject, message):
     """
@@ -757,4 +826,4 @@ def send_alert(subject, message):
         subject (str): The subject of the alert.
         message (str): The alert message.
     """
-    logger.error(f"ALERT: {subject} - {message}")
+    telegram_notifier.notify_error(subject, message)
