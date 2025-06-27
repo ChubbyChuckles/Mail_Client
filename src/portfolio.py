@@ -15,6 +15,7 @@ from .config import logger
 from .exchange import fetch_ticker_price, fetch_trade_details
 from .state import low_volatility_assets, negative_momentum_counts, portfolio, portfolio_lock
 from .utils import append_to_buy_trades_csv, append_to_finished_trades_csv, append_to_order_book_metrics_csv, calculate_dynamic_ema_period, calculate_ema
+from .bitvavo_order_metrics import calculate_order_book_metrics, fetch_order_book_with_retry  # Import for slippage calculation
 
 @retry(
     stop=stop_after_attempt(3),
@@ -57,6 +58,7 @@ def sell_asset(
     finished_trades,
     reason,
     price_monitor_manager,
+    sell_slippage=0.0,  # Added parameter for sell slippage
 ):
     """
     Sells a specified asset and updates the portfolio.
@@ -70,6 +72,7 @@ def sell_asset(
         finished_trades (list): List to append finished trade record.
         reason (str): Reason for selling.
         price_monitor_manager: Instance of PriceMonitorManager.
+        sell_slippage (float): Slippage percentage for selling (default: 0.0).
 
     Returns:
         dict or None: Finished trade details if sold, else None.
@@ -85,6 +88,8 @@ def sell_asset(
             raise ValueError(f"Invalid asset data for {symbol}")
         if not isinstance(current_price, (int, float)) or current_price <= 0:
             raise ValueError(f"Invalid sell price {current_price} for {symbol}")
+        if not isinstance(sell_slippage, (int, float)) or sell_slippage < 0:
+            raise ValueError(f"Invalid sell_slippage {sell_slippage} for {symbol}")
 
         if not portfolio_lock.acquire(timeout=5):
             logger.error(f"Timeout acquiring portfolio lock for {symbol}")
@@ -93,7 +98,7 @@ def sell_asset(
 
         try:
             logger.debug(f"Starting sell process for {symbol}: {reason}")
-            sale_value = asset["quantity"] * current_price
+            sale_value = asset["quantity"] * current_price * (1 - sell_slippage)  # Adjust for slippage
             sell_fee = sale_value * config.config.SELL_FEE
             net_sale_value = sale_value - sell_fee
             buy_value = asset["quantity"] * asset["purchase_price"]
@@ -106,9 +111,10 @@ def sell_asset(
                 "Buy Time": asset["purchase_time"].strftime("%Y-%m-%d %H:%M:%S"),
                 "Buy Fee": f"{buy_fee:.2f}",
                 "Sell Quantity": f"{asset['quantity']:.10f}",
-                "Sell Price": f"{current_price:.10f}",
+                "Sell Price": f"{current_price * (1 - sell_slippage):.10f}",  # Adjust for slippage
                 "Sell Time": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
                 "Sell Fee": f"{sell_fee:.2f}",
+                "Sell Slippage": f"{sell_slippage*100:.2f}%",  # Record slippage percentage
                 "Profit/Loss": f"{profit_loss:.2f}",
                 "Reason": reason,
             }
@@ -116,8 +122,8 @@ def sell_asset(
             finished_trades.append(finished_trade)
             logger.debug(f"Created finished trade record for {symbol}")
             logger.info(
-                f"Sold {asset['quantity']:.10f} {symbol} at {current_price:.8f} EUR for {net_sale_value:.2f} EUR "
-                f"(after {sell_fee:.2f} fee). Reason: {reason}"
+                f"Sold {asset['quantity']:.10f} {symbol} at {current_price * (1 - sell_slippage):.8f} EUR "
+                f"(after {sell_slippage*100:.2f}% slippage and {sell_fee:.2f} fee). Reason: {reason}"
             )
             del portfolio["assets"][symbol]
             low_volatility_assets.discard(symbol)
@@ -152,6 +158,7 @@ def sell_most_profitable_asset(
     percent_changes,
     finished_trades,
     price_monitor_manager=None,
+    sell_slippages=None,  # Added parameter for sell slippages
 ):
     """
     Sells the most profitable asset to free up a portfolio slot.
@@ -162,6 +169,7 @@ def sell_most_profitable_asset(
         percent_changes (pandas.DataFrame): DataFrame with price changes.
         finished_trades (list): List to append finished trade record.
         price_monitor_manager: Instance of PriceMonitorManager.
+        sell_slippages (dict): Dictionary of sell slippages for each asset (default: None).
 
     Returns:
         dict or None: Finished trade details if sold, else None.
@@ -176,6 +184,8 @@ def sell_most_profitable_asset(
             raise ValueError("Invalid percent_changes DataFrame")
         if not isinstance(finished_trades, list):
             raise ValueError("finished_trades must be a list")
+        if sell_slippages is not None and not isinstance(sell_slippages, dict):
+            raise ValueError("sell_slippages must be a dictionary")
 
         if not portfolio_lock.acquire(timeout=5):
             logger.error("Timeout acquiring portfolio lock")
@@ -213,14 +223,16 @@ def sell_most_profitable_asset(
                     (current_price - asset["purchase_price"]) / asset["purchase_price"]
                     if asset["purchase_price"] > 0 else 0
                 )
-                if unrealized_profit >= 0.01 and unrealized_profit > max_profit:
+                # Check slippage for selling decision
+                sell_slippage = sell_slippages.get(symbol, abs(config.config.MAX_SLIPPAGE_SELL) + 0.1) if sell_slippages else (abs(config.config.MAX_SLIPPAGE_SELL) + 0.1)
+                if unrealized_profit >= 0.01 and unrealized_profit > max_profit and sell_slippage <= abs(config.config.MAX_SLIPPAGE_SELL):
                     max_profit = unrealized_profit
-                    asset_to_sell = (symbol, asset, current_price)
+                    asset_to_sell = (symbol, asset, current_price, sell_slippage)
             if asset_to_sell is None:
-                logger.info("No assets with unrealized profit >= 1% to sell.")
+                logger.info("No assets with unrealized profit >= 1% or acceptable slippage to sell.")
                 return None
 
-            symbol, asset, current_price = asset_to_sell
+            symbol, asset, current_price, sell_slippage = asset_to_sell
             return sell_asset(
                 symbol,
                 asset,
@@ -230,6 +242,7 @@ def sell_most_profitable_asset(
                 finished_trades,
                 "Sold to free up slot for new buy",
                 price_monitor_manager,
+                sell_slippage,
             )
         finally:
             portfolio_lock.release()
@@ -317,6 +330,7 @@ def manage_portfolio(
     percent_changes,
     price_monitor_manager,
     order_book_metrics_list=None,
+    sell_slippages=None,  # Added parameter for sell slippages
 ):
     """
     Manages the portfolio by processing sell signals, updating assets, and buying new assets.
@@ -326,6 +340,7 @@ def manage_portfolio(
         percent_changes (pandas.DataFrame): DataFrame with price changes and OHLCV data.
         price_monitor_manager: Instance of PriceMonitorManager.
         order_book_metrics_list (list): List of order book metrics to update with buy decisions.
+        sell_slippages (dict): Dictionary of sell slippages for each asset (default: None).
 
     Raises:
         ValueError: If inputs are invalid.
@@ -342,12 +357,30 @@ def manage_portfolio(
             order_book_metrics_list = []
         elif not isinstance(order_book_metrics_list, list):
             raise ValueError("order_book_metrics_list must be a list")
+        if sell_slippages is not None and not isinstance(sell_slippages, dict):
+            raise ValueError("sell_slippages must be a dictionary")
 
         current_time = datetime.utcnow()
         five_min_ago = current_time - timedelta(minutes=5)
         finished_trades = []
         total_asset_value = 0.0
         skipped_assets = []
+
+        # Calculate sell slippage for all held assets
+        sell_slippages = sell_slippages or {}
+        for symbol in portfolio.get("assets", {}):
+            if symbol not in sell_slippages:  # Only calculate if not provided (e.g., not backtesting)
+                try:
+                    amount_quote = portfolio["assets"][symbol]["quantity"] * portfolio["assets"][symbol]["current_price"]
+                    metrics = calculate_order_book_metrics(symbol.replace("/", "-"), amount_quote=amount_quote)
+                    if "error" not in metrics and metrics.get("slippage_sell") is not None:
+                        sell_slippages[symbol] = metrics["slippage_sell"] / 100  # Convert percentage to decimal
+                    else:
+                        logger.warning(f"Could not calculate sell slippage for {symbol}. Using default value.")
+                        sell_slippages[symbol] = abs(config.config.MAX_SLIPPAGE_SELL) + 0.1  # Prevent selling
+                except Exception as e:
+                    logger.error(f"Error calculating sell slippage for {symbol}: {e}", exc_info=True)
+                    sell_slippages[symbol] = abs(config.config.MAX_SLIPPAGE_SELL) + 0.1  # Prevent selling
 
         if not portfolio_lock.acquire(timeout=5):
             logger.error("Timeout acquiring portfolio lock")
@@ -393,6 +426,7 @@ def manage_portfolio(
                         percent_changes,
                         finished_trades,
                         price_monitor_manager,
+                        sell_slippages,  # Pass sell slippages
                     )
                     if trade:
                         finished_trades.append(trade)
@@ -530,11 +564,11 @@ def manage_portfolio(
                         >= config.config.MOMENTUM_CONFIRM_MINUTES
                     )
                 )
+                sell_slippage = sell_slippages.get(symbol, abs(config.config.MAX_SLIPPAGE_SELL) + 0.1)
+                slippage_ok = sell_slippage <= abs(config.config.MAX_SLIPPAGE_SELL)
                 sell_signal = (
-                    multiplied_profit_target
-                    or regular_sell_signal
-                    or catastrophic_loss
-                    or time_stop
+                    (multiplied_profit_target or regular_sell_signal or catastrophic_loss or time_stop)
+                    and slippage_ok
                 )
                 if sell_signal:
                     reason = (
@@ -552,7 +586,8 @@ def manage_portfolio(
                         f"Trailing Loss: {trailing_loss:.4f}, ATR Stop: {trailing_stop:.4f}, "
                         f"Profit/Loss: {unrealized_profit:.4f}, Profit Target: {profit_target:.4f}, "
                         f"EMA_{ema_period}: {ema_dynamic:.2f}, "
-                        f"Holding: {holding_minutes:.2f} min, Neg Momentum Count: {negative_momentum_counts.get(symbol, 0)}"
+                        f"Holding: {holding_minutes:.2f} min, Neg Momentum Count: {negative_momentum_counts.get(symbol, 0)}, "
+                        f"Sell Slippage: {sell_slippage*100:.2f}%"
                     )
                     trade = sell_asset(
                         symbol,
@@ -563,9 +598,25 @@ def manage_portfolio(
                         finished_trades,
                         reason,
                         price_monitor_manager,
+                        sell_slippage,
                     )
                     if trade:
                         finished_trades.append(trade)
+                else:
+                    if not slippage_ok:
+                        logger.info(
+                            f"Delaying sell for {symbol}: Sell slippage {sell_slippage*100:.2f}% exceeds threshold {abs(config.config.MAX_SLIPPAGE_SELL)*100:.2f}%"
+                        )
+                    # Log asset statistics including sell slippage
+                    logger.info(
+                        f"Asset: {symbol}, "
+                        f"Current: {current_price:.4f}, "
+                        f"Purchase: {purchase_price:.4f}, "
+                        f"Quantity: {asset['quantity']:.4f}, "
+                        f"Unrealized P/L: {unrealized_profit*100:.2f}%, "
+                        f"Sell Slippage: {sell_slippage*100:.2f}%, "
+                        f"Holding: {holding_minutes:.2f} min"
+                    )
 
             # Buy new assets and update order book metrics
             for record in above_threshold_data:
@@ -642,6 +693,7 @@ def manage_portfolio(
                         percent_changes,
                         finished_trades,
                         price_monitor_manager,
+                        sell_slippages,
                     )
                     if trade:
                         finished_trades.append(trade)
