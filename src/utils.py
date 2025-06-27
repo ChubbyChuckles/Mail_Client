@@ -121,7 +121,7 @@ def append_to_buy_trades_csv(trade_data):
     """
     try:
         required_fields = [
-            "Symbol", "Buy Quantity", "Buy Price", "Buy Time", "Buy Fee",
+            "Symbol", "Buy Quantity", "Buy Price", "Buy Time", "Buy Fee", 'Buy Slippage', 'Actual Cost',
             "Allocation", "Trade Count", "Largest Trade Volume EUR"
         ]
         if not all(field in trade_data for field in required_fields):
@@ -167,7 +167,7 @@ def append_to_finished_trades_csv(trade_data):
     try:
         required_fields = [
             "Symbol", "Buy Quantity", "Buy Price", "Buy Time", "Buy Fee",
-            "Sell Quantity", "Sell Price", "Sell Time", "Sell Fee", "Profit/Loss", "Reason"
+            "Sell Quantity", "Sell Price", "Sell Time", "Sell Fee", "Sell Slippage", "Profit/Loss", "Reason"
         ]
         if not all(field in trade_data for field in required_fields):
             raise ValueError(f"trade_data missing required fields: {set(required_fields) - set(trade_data.keys())}")
