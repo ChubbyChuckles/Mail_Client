@@ -44,8 +44,13 @@ def print_portfolio(file_path: str) -> None:
         # Process each asset
         for symbol, data in portfolio['assets'].items():
             # Calculate additional metrics
-            profit_loss_percent = ((data['current_price'] - data['purchase_price']) / 
-                                 data['purchase_price'] * 100)
+            buy_fee = data.get('buy_fee', 0)  # Get buy fee, default to 0 if not present
+            total_cost = data['purchase_price'] * data['quantity'] + buy_fee
+            profit_loss_percent = (
+                ((data['current_price'] * data['quantity']) - total_cost) / total_cost * 100
+                if total_cost > 0
+                else 0
+            )
             total_value = data['quantity'] * data['current_price']
 
             # Prepare row data
