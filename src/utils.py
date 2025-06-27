@@ -334,7 +334,7 @@ def append_to_order_book_metrics_csv(metrics_list):
             os.fsync(temp_file.fileno())
         
         move_file_with_retry(temp_file.name, file_path)
-        logger.info(f"Appended {len(metrics_list)} order book metrics to {file_path}")
+        # logger.info(f"Appended {len(metrics_list)} order book metrics to {file_path}")
     except (ValueError, OSError) as e:
         logger.error(f"Error appending to {config.config.ORDER_BOOK_METRICS_CSV}: {e}", exc_info=True)
         send_alert("Order Book Metrics CSV Failure", f"Error appending to order book metrics CSV: {e}")

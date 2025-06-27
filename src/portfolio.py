@@ -304,7 +304,7 @@ def save_portfolio():
                 temp_file.flush()
                 os.fsync(temp_file.fileno())
             shutil.move(temp_file.name, file_path)
-            logger.info(f"Saved portfolio to {file_path}")
+            # logger.info(f"Saved portfolio to {file_path}")
 
             # Save to backup file
             backup_file = f"{file_path}.backup_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}"
@@ -313,7 +313,7 @@ def save_portfolio():
                 temp_file.flush()
                 os.fsync(temp_file.fileno())
             shutil.move(temp_file.name, backup_file)
-            logger.info(f"Saved portfolio backup to {backup_file}")
+            # logger.info(f"Saved portfolio backup to {backup_file}")
 
             # Manage backup files: keep only the 3 latest
             backup_files = glob.glob(f"{file_path}.backup_*")
@@ -780,9 +780,9 @@ def manage_portfolio(
         logger.warning(
             f"Portfolio value may be inaccurate due to missing prices for: {', '.join(skipped_assets)}"
         )
-    logger.info(
-        f"Portfolio: Cash: {portfolio.get('cash', 0):.2f} EUR, Assets: {len(portfolio.get('assets', {}))}, Total Value: {total_portfolio_value:.2f} EUR"
-    )
+    # logger.info(
+    #     f"Portfolio: Cash: {portfolio.get('cash', 0):.2f} EUR, Assets: {len(portfolio.get('assets', {}))}, Total Value: {total_portfolio_value:.2f} EUR"
+    # )
     # Add these notification calls here
     if not hasattr(telegram_notifier, 'last_summary_time') or \
     (datetime.utcnow() - telegram_notifier.last_summary_time).total_seconds() >= 3600:

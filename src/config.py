@@ -123,7 +123,7 @@ class Config:
                 "TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID missing. Telegram notifications disabled."
             )
 
-        logger.info("Configuration reloaded from .env file")
+        # logger.info("Configuration reloaded from .env file")
 
 # Instantiate the singleton config object
 config = Config()

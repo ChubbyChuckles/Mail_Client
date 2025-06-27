@@ -68,7 +68,7 @@ def save_to_local(df, output_path):
             table = pa.Table.from_pandas(combined_df, preserve_index=False)
             pq.write_table(table, temp_file.name)
             move_file_with_retry(temp_file.name, output_path)
-            logger.info(f"Saved {len(df)} records to {output_path}")
+            # logger.info(f"Saved {len(df)} records to {output_path}")
         finally:
             if os.path.exists(temp_file.name):
                 try:
