@@ -83,6 +83,7 @@ class Config:
         self.PARQUET_FILENAME = os.getenv("PARQUET_FILENAME", "bitvavo_1min_candles_eur.parquet")
         self.PRICE_INCREASE_THRESHOLD = float(os.getenv("PRICE_INCREASE_THRESHOLD", 1.0))
         self.MIN_VOLUME_EUR = float(os.getenv("MIN_VOLUME_EUR", 10000))
+        self.VOLUME_DROP_THRESHOLD = float(os.getenv("VOLUME_DROP_THRESHOLD", 0.5))
         self.PORTFOLIO_VALUE = float(os.getenv("PORTFOLIO_VALUE", 10000))
         self.ALLOCATION_PER_TRADE = float(os.getenv("ALLOCATION_PER_TRADE", 0.1))
         self.BUY_FEE = float(os.getenv("BUY_FEE", 0.0015))
@@ -94,6 +95,7 @@ class Config:
         self.MIN_HOLDING_MINUTES = float(os.getenv("MIN_HOLDING_MINUTES", 5))
         self.TIME_STOP_MINUTES = int(os.getenv("TIME_STOP_MINUTES", 90))
         self.CAT_LOSS_THRESHOLD = float(os.getenv("CAT_LOSS_THRESHOLD", -0.08))
+        self.CAT_LOSS_ATR_MULTIPLIER = float(os.getenv("CAT_LOSS_ATR_MULTIPLIER", 2.0))
         self.MOMENTUM_CONFIRM_MINUTES = int(os.getenv("MOMENTUM_CONFIRM_MINUTES", 3))
         self.MOMENTUM_THRESHOLD = float(os.getenv("MOMENTUM_THRESHOLD", -0.25))
         self.PORTFOLIO_FILE = os.getenv("PORTFOLIO_FILE", "portfolio.json")
@@ -110,6 +112,34 @@ class Config:
         self.MAX_SLIPPAGE_BUY = self.parse_float_env("MAX_SLIPPAGE_BUY", 0.05)
         self.MAX_SLIPPAGE_SELL = self.parse_float_env("MAX_SLIPPAGE_SELL", -0.05)
         self.MIN_TOTAL_SCORE = self.parse_float_env("MIN_TOTAL_SCORE", 0.7)
+        self.RSI_OVERSOLD_THRESHOLD=int(os.getenv("RSI_OVERSOLD_THRESHOLD", 30))
+        self.RSI_OVERSOLD_PERIOD=int(os.getenv("RSI_OVERSOLD_PERIOD", 14))
+        self.RSI_OVERBOUGHT_THRESHOLD=int(os.getenv("RSI_OVERBOUGHT_THRESHOLD", 70))
+        self.RSI_OVERBOUGHT_PERIOD=int(os.getenv("RSI_OVERBOUGHT_PERIOD", 14))
+        self.BOLLINGER_LOWER_PERIOD=int(os.getenv("BOLLINGER_LOWER_PERIOD", 20))
+        self.BOLLINGER_LOWER_STD_DEV=self.parse_float_env("BOLLINGER_LOWER_STD_DEV", 2.0)
+        self.BOLLINGER_UPPER_PERIOD=int(os.getenv("BOLLINGER_UPPER_PERIOD", 20))
+        self.BOLLINGER_UPPER_STD_DEV=self.parse_float_env("BOLLINGER_UPPER_STD_DEV", 2.0)
+        self.MACD_BULLISH_FAST_PERIOD=int(os.getenv("MACD_BULLISH_FAST_PERIOD", 12))
+        self.MACD_BULLISH_SLOW_PERIOD=int(os.getenv("MACD_BULLISH_SLOW_PERIOD", 26))
+        self.MACD_BULLISH_SIGNAL_PERIOD=int(os.getenv("MACD_BULLISH_SIGNAL_PERIOD", 9))
+        self.MACD_BEARISH_FAST_PERIOD=int(os.getenv("MACD_BEARISH_FAST_PERIOD", 12))
+        self.MACD_BEARISH_SLOW_PERIOD=int(os.getenv("MACD_BEARISH_SLOW_PERIOD", 26))
+        self.MACD_BEARISH_SIGNAL_PERIOD=int(os.getenv("MACD_BEARISH_SIGNAL_PERIOD", 9))
+        self.GRID_ENABLED=bool(os.getenv("GRID_ENABLED", False))
+        self.GRID_RANGE=self.parse_float_env("GRID_RANGE", 0.05)
+        self.GRID_STEP=self.parse_float_env("GRID_STEP", 0.01)
+        self.GRID_MAX_ORDERS=int(os.getenv("GRID_MAX_ORDERS", 4)) # Maximum number of grid orders
+        self.GRID_BB_PERIOD=int(os.getenv("GRID_BB_PERIOD", 20)) # Bollinger Bands period for grid trading
+        self.GRID_BB_STD_DEV=self.parse_float_env("GRID_BB_STD_DEV", 1.0) # Bollinger Bands standard deviation for grid trading
+        self.DCA_ENABLED=bool(os.getenv("DCA_ENABLED", False))
+        self.DCA_DROP_THRESHOLD=self.parse_float_env("DCA_DROP_THRESHOLD", 0.05) # Percentage drop to trigger DCA
+        self.DCA_ALLOCATION=self.parse_float_env("DCA_ALLOCATION", 0.02) # Percentage of portfolio to allocate for DCA
+        self.VOLATILITY_SIZING_ENABLED=bool(os.getenv("VOLATILITY_SIZING_ENABLED", False))
+        self.VOLATILITY_ATR_PERIOD=int(os.getenv("VOLATILITY_ATR_PERIOD", 14)) # ATR period for volatility sizing
+        self.VOLATILITY_MAX_ALLOCATION_MULTIPLIER=self.parse_float_env("VOLATILITY_MAX_ALLOCATION_MULTIPLIER", 1.5) # Multiplier for ATR to
+        self.VOLATILITY_MIN_ALLOCATION_MULTIPLIER=self.parse_float_env("VOLATILITY_MIN_ALLOCATION_MULTIPLIER", 0.5) # Minimum allocation multiplier for volatility sizing
+        self.MAX_DRAWDOWN=self.parse_float_env("MAX_DRAWDOWN", 0.1) # Maximum drawdown allowed before stopping trading
 
         if self.MAX_ACTIVE_ASSETS < 1:
             logger.warning(

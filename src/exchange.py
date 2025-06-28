@@ -193,46 +193,71 @@ def fetch_klines(symbol, timeframe=config.config.CANDLE_TIMEFRAME, limit=config.
         limit (int): Number of candles to fetch (default: 10).
 
     Returns:
-        pandas.DataFrame: OHLCV data with columns ['timestamp', 'open', 'high', 'low', 'close', 'volume', 'symbol'].
+        pandas.DataFrame: OHLCV data with columns ['timestamp', 'open', 'high', 'low', 'close_price', 'volume', 'volume_eur', 'symbol'].
     """
     global is_banned, ban_expiry_time
     if is_banned and time.time() < ban_expiry_time:
         logger.warning(
             f"API is banned until {datetime.utcfromtimestamp(ban_expiry_time)}. Skipping fetch for {symbol}."
         )
-        return pd.DataFrame()  # Return empty DataFrame to continue execution
+        return pd.DataFrame()
     with semaphore:
-        check_rate_limit(1)  # Weight for fetch_ohlcv is typically 1
+        check_rate_limit(1)
         try:
             start_time = time.time()
             klines = bitvavo.fetch_ohlcv(symbol, timeframe, limit=limit)
+            logger.debug(f"Raw OHLCV data for {symbol}: {klines[:5]}")
             df = pd.DataFrame(
                 klines, columns=["timestamp", "open", "high", "low", "close", "volume"]
             )
+            # Rename close to close_price
+            df = df.rename(columns={"close": "close_price"})
+            # Check for duplicate columns
+            if df.columns.duplicated().any():
+                logger.warning(f"Duplicate columns in fetch_klines for {symbol}: {df.columns[df.columns.duplicated()].tolist()}")
+                df = df.loc[:, ~df.columns.duplicated()]
             df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms")
             df["symbol"] = symbol
-            # Validate prices
-            if (df[["open", "high", "low", "close"]] <= 0).any().any():
+            # Handle lists in volume
+            if df["volume"].apply(lambda x: isinstance(x, (list, tuple))).any():
+                logger.warning(f"Volume column contains lists for {symbol}: {df['volume'].head().tolist()}")
+                df["volume"] = df["volume"].apply(
+                    lambda x: x[0] if isinstance(x, (list, tuple)) and len(x) > 0 else pd.NA
+                )
+            # Ensure all columns are numeric
+            for col in ["open", "high", "low", "close_price", "volume"]:
+                df[col] = pd.to_numeric(df[col], errors="coerce")
+                if df[col].isna().any():
+                    logger.warning(
+                        f"Non-numeric or invalid values in {col} for {symbol}: {df[df[col].isna()]['symbol'].tolist()}"
+                    )
+                    return pd.DataFrame()
+            # Calculate volume_eur
+            df["volume_eur"] = df["volume"] * df["close_price"]
+            # Validate prices and volume
+            if (df[["open", "high", "low", "close_price", "volume", "volume_eur"]] <= 0).any().any():
                 logger.error(
-                    f"Invalid prices (zero or negative) in OHLCV data for {symbol}. Discarding data."
+                    f"Invalid prices or volume (zero or negative) in OHLCV data for {symbol}. Discarding data."
                 )
                 return pd.DataFrame()
             logger.debug(
-                f"Fetched {len(df)} candles for {symbol} in {time.time() - start_time:.2f} seconds"
+                f"Fetched {len(df)} candles for {symbol} in {time.time() - start_time:.2f} seconds, volume_eur: {df['volume_eur'].sum():.2f} EUR"
             )
+            if symbol == "SEI/EUR":
+                logger.debug(f"SEI/EUR volume_eur: {df['volume_eur'].sum():.2f} EUR, close_price: {df['close_price'].iloc[-1]:.8f}")
             return df
         except PermissionDenied as e:
             ban_expiry = handle_ban_error(e)
             if ban_expiry:
                 wait_until_ban_lifted(ban_expiry)
-                return pd.DataFrame()  # Return empty DataFrame instead of raising
+                return pd.DataFrame()
             logger.error(f"Permission denied for {symbol}: {e}")
             return pd.DataFrame()
         except ccxt.NetworkError as e:
             ban_expiry = handle_ban_error(e)
             if ban_expiry:
                 wait_until_ban_lifted(ban_expiry)
-                return pd.DataFrame()  # Return empty DataFrame instead of raising
+                return pd.DataFrame()
             logger.error(f"Network error fetching data for {symbol}: {e}")
             return pd.DataFrame()
         except Exception as e:

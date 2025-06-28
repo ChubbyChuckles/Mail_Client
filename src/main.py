@@ -193,8 +193,10 @@ def main():
                         try:
                             result = future.result(timeout=30)
                             if not result.empty:
+                                logger.debug(f"Data for {symbol}: columns={result.columns.tolist()}, dtypes={result.dtypes.to_dict()}, rows={len(result)}, volume: {result['volume'].sum():.2f} EUR")
                                 all_data.append(result)
-                            logger.debug(f"Received result for {symbol}")
+                            else:
+                                logger.warning(f"Empty DataFrame returned for {symbol}")
                         except FutureTimeoutError:
                             logger.error(f"Timeout fetching klines for {symbol}")
                         except (ccxt.NetworkError, ccxt.RequestTimeout) as e:
@@ -208,6 +210,24 @@ def main():
             if all_data:
                 try:
                     combined_df = pd.concat(all_data, ignore_index=True)
+                    logger.debug(f"Combined DataFrame: columns={combined_df.columns.tolist()}, dtypes={combined_df.dtypes.to_dict()}, rows={len(combined_df)}")
+                    # Check for duplicate columns
+                    if combined_df.columns.duplicated().any():
+                        logger.warning(f"Duplicate columns in combined_df: {combined_df.columns[combined_df.columns.duplicated()].tolist()}")
+                        combined_df = combined_df.loc[:, ~combined_df.columns.duplicated()]
+                    # Log volume for SEI/EUR
+                    if "symbol" in combined_df.columns and "volume" in combined_df.columns:
+                        sei_volume = combined_df[combined_df["symbol"] == "SEI/EUR"]["volume"].sum() if "SEI/EUR" in combined_df["symbol"].values else 0
+                        logger.debug(f"SEI/EUR volume in combined_df: {sei_volume:.2f} EUR")
+                    # Handle lists in volume
+                    if "volume" in combined_df.columns and combined_df["volume"].apply(lambda x: isinstance(x, (list, tuple))).any():
+                        logger.warning(f"Lists found in volume column: {combined_df['volume'].head().tolist()}")
+                        combined_df["volume"] = combined_df["volume"].apply(
+                            lambda x: x[1] if isinstance(x, (list, tuple)) and len(x) > 1 
+                            else x[0] if isinstance(x, (list, tuple)) and len(x) > 0 and len(set(x)) <= 1 
+                            else pd.NA
+                        )
+                        combined_df["volume"] = pd.to_numeric(combined_df["volume"], errors="coerce")
                     output_path = (
                         f"{config.config.RESULTS_FOLDER}/"
                         f"{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}_"
@@ -225,19 +245,27 @@ def main():
                     above_threshold_data, percent_changes, order_book_metrics_list = (
                         verify_and_analyze_data(combined_df, price_monitor_manager)
                     )
+                    # Log SEI/EUR volume
+                    if isinstance(above_threshold_data, pd.DataFrame) and "symbol" in above_threshold_data.columns and "volume_eur" in above_threshold_data.columns:
+                        sei_volume = above_threshold_data[above_threshold_data["symbol"] == "SEI/EUR"]["volume_eur"].sum() if "SEI/EUR" in above_threshold_data["symbol"].values else 0
+                        logger.debug(f"SEI/EUR volume_eur in above_threshold_data: {sei_volume:.2f} EUR")
+                    else:
+                        logger.warning(f"above_threshold_data is not a DataFrame or missing required columns: {type(above_threshold_data)}")
                 except Exception as e:
                     logger.error(f"Error analyzing data: {e}", exc_info=True)
                     continue
 
                 try:
-                    manage_portfolio(
-                        above_threshold_data,
-                        percent_changes,
-                        price_monitor_manager,
-                        order_book_metrics_list,
+                    # Pass data to manage_portfolio
+                    orders, total_value = manage_portfolio(
+                        candidate_assets=above_threshold_data.to_dict("records") if isinstance(above_threshold_data, pd.DataFrame) else [],
+                        market_data=combined_df,
+                        price_monitor_manager=price_monitor_manager,
+                        order_book_metrics_list=order_book_metrics_list
                     )
                 except Exception as e:
-                    logger.error(f"Error managing portfolio: {e}", exc_info=True)
+                    logger.error(f"Error in manage_portfolio: {e}", exc_info=True)
+                    continue
 
                 try:
                     save_portfolio()
