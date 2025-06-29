@@ -3,30 +3,317 @@ import glob
 import json
 import os
 import time
-import requests
 from datetime import datetime, timedelta
 import numpy as np
 import pandas as pd
 import tempfile
 import shutil
+import requests
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 from . import config
 from .config import logger
 from .exchange import fetch_ticker_price, fetch_trade_details
 from .state import low_volatility_assets, negative_momentum_counts, portfolio, portfolio_lock
 from .utils import append_to_buy_trades_csv, append_to_finished_trades_csv, append_to_order_book_metrics_csv, calculate_dynamic_ema_period, calculate_ema
-from .bitvavo_order_metrics import calculate_order_book_metrics, fetch_order_book_with_retry
+from .bitvavo_order_metrics import calculate_order_book_metrics
 
 from .telegram_notifications import TelegramNotifier
 import asyncio
 
-portfolio_values = []  # At the top of portfolio.py
+portfolio_values = []  # Track portfolio value over time
 
 telegram_notifier = TelegramNotifier(
     bot_token=config.config.TELEGRAM_BOT_TOKEN,
     chat_id=config.config.TELEGRAM_CHAT_ID
 )
 asyncio.run_coroutine_threadsafe(telegram_notifier.start(), asyncio.get_event_loop())
+
+# --- Metric Classes ---
+
+class Metric:
+    """Base class for trading metrics."""
+    def __init__(self, name, weight=1.0, enabled=True):
+        self.name = name
+        self.weight = weight
+        self.enabled = enabled
+
+    def compute(self, data):
+        """Compute the metric value."""
+        raise NotImplementedError(f"Metric {self.name} must implement compute method.")
+
+    def evaluate(self, value):
+        """Evaluate if the metric meets the trading condition."""
+        raise NotImplementedError(f"Metric {self.name} must implement evaluate method.")
+
+class SlippageBuyMetric(Metric):
+    """Evaluates buy slippage against a threshold."""
+    def __init__(self, threshold, weight=1.0, enabled=True):
+        super().__init__("slippage_buy", weight, enabled)
+        self.threshold = threshold  # e.g., 0.05 for 5%
+
+    def compute(self, data):
+        return data.get("slippage_buy", float("inf"))
+
+    def evaluate(self, value):
+        return value <= self.threshold if value is not None else False
+
+class SlippageSellMetric(Metric):
+    """Evaluates sell slippage against a threshold."""
+    def __init__(self, threshold, weight=1.0, enabled=True):
+        super().__init__("slippage_sell", weight, enabled)
+        self.threshold = threshold  # e.g., -0.05 for -5%
+
+    def compute(self, data):
+        return data.get("slippage_sell", float("inf"))
+
+    def evaluate(self, value):
+        return abs(value) <= abs(self.threshold) if value is not None else False
+
+class TotalScoreMetric(Metric):
+    """Evaluates total score from order book analysis."""
+    def __init__(self, threshold, weight=1.0, enabled=True):
+        super().__init__("total_score", weight, enabled)
+        self.threshold = threshold  # e.g., 0.7
+
+    def compute(self, data):
+        return data.get("total_score", 0.0)
+
+    def evaluate(self, value):
+        return value >= self.threshold if value is not None else False
+
+class MomentumMetric(Metric):
+    """Evaluates momentum based on recent price change."""
+    def __init__(self, threshold, confirm_minutes, weight=1.0, enabled=True):
+        super().__init__("momentum", weight, enabled)
+        self.threshold = threshold  # e.g., -0.25
+        self.confirm_minutes = confirm_minutes  # e.g., 3
+
+    def compute(self, data):
+        symbol = data.get("symbol")
+        negative_count = negative_momentum_counts.get(symbol, 0)
+        momentum = data.get("momentum", 0.0)
+        if momentum < self.threshold:
+            negative_momentum_counts[symbol] = negative_count + 1
+        else:
+            negative_momentum_counts[symbol] = 0
+        return negative_momentum_counts[symbol]
+
+    def evaluate(self, value):
+        return value < self.confirm_minutes
+
+class ProfitTargetMetric(Metric):
+    """Evaluates unrealized profit against a dynamic profit target."""
+    def __init__(self, base_target, multiplier, weight=1.0, enabled=True):
+        super().__init__("profit_target", weight, enabled)
+        self.base_target = base_target  # e.g., 0.05
+        self.multiplier = multiplier  # e.g., 2.0
+
+    def compute(self, data):
+        current_price = data.get("current_price", 0)
+        purchase_price = data.get("purchase_price", 0)
+        atr = data.get("atr", 0)
+        holding_minutes = data.get("holding_minutes", 0)
+        profit_target = (
+            max(0.015, min(self.base_target, 1.2 * atr / purchase_price))
+            if atr > 0 and purchase_price > 0
+            else self.base_target
+        )
+        if data.get("near_threshold", False):
+            profit_target = min(profit_target, config.config.ADJUSTED_PROFIT_TARGET)
+        unrealized_profit = (
+            (current_price - purchase_price) / purchase_price
+            if purchase_price > 0 else 0
+        )
+        return {
+            "unrealized_profit": unrealized_profit,
+            "profit_target": profit_target,
+            "multiplied_target": self.multiplier * profit_target
+        }
+
+    def evaluate(self, value):
+        unrealized_profit = value["unrealized_profit"]
+        profit_target = value["profit_target"]
+        multiplied_target = value["multiplied_target"]
+        return unrealized_profit >= profit_target or unrealized_profit >= multiplied_target
+
+class TrailingStopMetric(Metric):
+    """Evaluates trailing stop loss based on ATR and holding time."""
+    def __init__(self, factor, early_factor, weight=1.0, enabled=True):
+        super().__init__("trailing_stop", weight, enabled)
+        self.factor = factor  # e.g., 1.0
+        self.early_factor = early_factor  # e.g., 1.5
+
+    def compute(self, data):
+        current_price = data.get("current_price", 0)
+        highest_price = data.get("highest_price", 0)
+        purchase_price = data.get("purchase_price", 0)
+        atr = data.get("atr", 0)
+        holding_minutes = data.get("holding_minutes", 0)
+        trailing_stop = (
+            (self.early_factor if holding_minutes < 15 else self.factor) * atr / purchase_price
+            if atr > 0 and purchase_price > 0
+            else 0.05
+        )
+        trailing_loss = (
+            (highest_price - current_price) / highest_price
+            if highest_price > purchase_price else 0
+        )
+        return {"trailing_loss": trailing_loss, "trailing_stop": trailing_stop}
+
+    def evaluate(self, value):
+        return value["trailing_loss"] >= value["trailing_stop"]
+
+class CatastrophicLossMetric(Metric):
+    """Evaluates catastrophic loss based on unrealized profit and ATR."""
+    def __init__(self, threshold, weight=1.0, enabled=True):
+        super().__init__("catastrophic_loss", weight, enabled)
+        self.threshold = threshold  # e.g., -0.08
+
+    def compute(self, data):
+        current_price = data.get("current_price", 0)
+        purchase_price = data.get("purchase_price", 0)
+        atr = data.get("atr", 0)
+        unrealized_profit = (
+            (current_price - purchase_price) / purchase_price
+            if purchase_price > 0 else 0
+        )
+        return {
+            "unrealized_profit": unrealized_profit,
+            "catastrophic": unrealized_profit <= self.threshold and abs(unrealized_profit) > 2 * atr / purchase_price
+            if atr > 0 and purchase_price > 0 else False
+        }
+
+    def evaluate(self, value):
+        return value["catastrophic"]
+
+class TimeStopMetric(Metric):
+    """Evaluates time stop based on holding time and unrealized profit."""
+    def __init__(self, time_stop_minutes, weight=1.0, enabled=True):
+        super().__init__("time_stop", weight, enabled)
+        self.time_stop_minutes = time_stop_minutes  # e.g., 90
+
+    def compute(self, data):
+        holding_minutes = data.get("holding_minutes", 0)
+        current_price = data.get("current_price", 0)
+        purchase_price = data.get("purchase_price", 0)
+        unrealized_profit = (
+            (current_price - purchase_price) / purchase_price
+            if purchase_price > 0 else 0
+        )
+        return {
+            "holding_minutes": holding_minutes,
+            "unrealized_profit": unrealized_profit
+        }
+
+    def evaluate(self, value):
+        return value["holding_minutes"] >= self.time_stop_minutes and value["unrealized_profit"] < 0
+
+# --- Trading Strategy Class ---
+
+class TradingStrategy:
+    """Manages buy and sell decisions based on configurable metrics."""
+    def __init__(self, config_dict=None):
+        self.metrics = []
+        self.load_config(config_dict or self.default_config())
+
+    def default_config(self):
+        """Default strategy configuration."""
+        return {
+            "buy_metrics": [
+                {"name": "slippage_buy", "threshold": config.config.MAX_SLIPPAGE_BUY, "weight": 0.4, "enabled": True},
+                {"name": "total_score", "threshold": config.config.MIN_TOTAL_SCORE, "weight": 0.6, "enabled": True},
+            ],
+            "sell_metrics": [
+                {"name": "slippage_sell", "threshold": config.config.MAX_SLIPPAGE_SELL, "weight": 0.2, "enabled": True},
+                {"name": "profit_target", "base_target": config.config.PROFIT_TARGET, "multiplier": config.config.PROFIT_TARGET_MULTIPLIER, "weight": 0.3, "enabled": True},
+                {"name": "trailing_stop", "factor": config.config.TRAILING_STOP_FACTOR, "early_factor": config.config.TRAILING_STOP_FACTOR_EARLY, "weight": 0.2, "enabled": True},
+                {"name": "catastrophic_loss", "threshold": config.config.CAT_LOSS_THRESHOLD, "weight": 0.2, "enabled": True},
+                {"name": "time_stop", "time_stop_minutes": config.config.TIME_STOP_MINUTES, "weight": 0.2, "enabled": True},
+                {"name": "momentum", "threshold": config.config.MOMENTUM_THRESHOLD, "confirm_minutes": config.config.MOMENTUM_CONFIRM_MINUTES, "weight": 0.1, "enabled": True},
+            ]
+        }
+
+    def load_config(self, config_dict):
+        """Loads metrics from configuration."""
+        metric_classes = {
+            "slippage_buy": SlippageBuyMetric,
+            "slippage_sell": SlippageSellMetric,
+            "total_score": TotalScoreMetric,
+            "momentum": MomentumMetric,
+            "profit_target": ProfitTargetMetric,
+            "trailing_stop": TrailingStopMetric,
+            "catastrophic_loss": CatastrophicLossMetric,
+            "time_stop": TimeStopMetric,
+        }
+        self.metrics = {"buy": [], "sell": []}
+        for metric_config in config_dict.get("buy_metrics", []):
+            if metric_config.get("enabled", True):
+                metric_class = metric_classes.get(metric_config["name"])
+                if metric_class:
+                    self.metrics["buy"].append(metric_class(**{k: v for k, v in metric_config.items() if k != "name"}))
+        for metric_config in config_dict.get("sell_metrics", []):
+            if metric_config.get("enabled", True):
+                metric_class = metric_classes.get(metric_config["name"])
+                if metric_class:
+                    self.metrics["sell"].append(metric_class(**{k: v for k, v in metric_config.items() if k != "name"}))
+
+    def evaluate_buy(self, data):
+        """Evaluates buy conditions based on configured metrics."""
+        results = []
+        total_weight = sum(metric.weight for metric in self.metrics["buy"] if metric.enabled)
+        if total_weight == 0:
+            logger.warning("No enabled buy metrics configured.")
+            return False, []
+
+        for metric in self.metrics["buy"]:
+            if not metric.enabled:
+                continue
+            value = metric.compute(data)
+            passes = metric.evaluate(value)
+            results.append({
+                "metric": metric.name,
+                "value": value,
+                "passes": passes,
+                "weight": metric.weight
+            })
+            logger.debug(f"Buy metric {metric.name}: value={value}, passes={passes}")
+
+        # Require all metrics to pass (can be modified to use weighted scoring)
+        all_pass = all(result["passes"] for result in results)
+        return all_pass, results
+
+    def evaluate_sell(self, data):
+        """Evaluates sell conditions based on configured metrics."""
+        results = []
+        total_weight = sum(metric.weight for metric in self.metrics["sell"] if metric.enabled)
+        if total_weight == 0:
+            logger.warning("No enabled sell metrics configured.")
+            return False, [], "No metrics"
+
+        for metric in self.metrics["sell"]:
+            if not metric.enabled:
+                continue
+            value = metric.compute(data)
+            passes = metric.evaluate(value)
+            results.append({
+                "metric": metric.name,
+                "value": value,
+                "passes": passes,
+                "weight": metric.weight
+            })
+            logger.debug(f"Sell metric {metric.name}: value={value}, passes={passes}")
+
+        # Any passing metric triggers a sell
+        for result in results:
+            if result["passes"]:
+                reason = (
+                    f"{result['metric'].replace('_', ' ').title()} "
+                    f"(value={result['value']})"
+                )
+                return True, results, reason
+        return False, results, "No sell conditions met"
+
+# --- Modified Functions ---
 
 @retry(
     stop=stop_after_attempt(3),
@@ -73,23 +360,6 @@ def sell_asset(
 ):
     """
     Sells a specified asset and updates the portfolio.
-
-    Args:
-        symbol (str): Asset symbol.
-        asset (dict): Asset details.
-        current_price (float): Current price of the asset.
-        portfolio (dict): Portfolio state.
-        portfolio_lock (Lock): Thread lock for portfolio updates.
-        finished_trades (list): List to append finished trade record.
-        reason (str): Reason for selling.
-        price_monitor_manager: Instance of PriceMonitorManager.
-        sell_slippage (float): Slippage percentage for selling (default: 0.0).
-
-    Returns:
-        dict or None: Finished trade details if sold, else None.
-
-    Raises:
-        ValueError: If inputs are invalid.
     """
     try:
         # Input validation
@@ -109,7 +379,7 @@ def sell_asset(
 
         try:
             logger.debug(f"Starting sell process for {symbol}: {reason}")
-            sale_value = asset["quantity"] * current_price * (1 - abs(sell_slippage))  # Use absolute value for calculation
+            sale_value = asset["quantity"] * current_price * (1 - abs(sell_slippage))
             sell_fee = sale_value * config.config.SELL_FEE
             net_sale_value = sale_value - sell_fee
             buy_value = asset["quantity"] * asset["purchase_price"]
@@ -125,7 +395,7 @@ def sell_asset(
                 "Sell Price": f"{current_price * (1 - abs(sell_slippage)):.10f}",
                 "Sell Time": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
                 "Sell Fee": f"{sell_fee:.2f}",
-                "Sell Slippage": f"{sell_slippage:.2f}%",  # Log original sign
+                "Sell Slippage": f"{sell_slippage:.2f}%",
                 "Profit/Loss": f"{profit_loss:.2f}",
                 "Reason": reason,
             }
@@ -134,7 +404,7 @@ def sell_asset(
             logger.debug(f"Created finished trade record for {symbol}")
             logger.info(
                 f"Sold {asset['quantity']:.10f} {symbol} at {current_price * (1 - abs(sell_slippage)):.8f} EUR "
-                f"(after {sell_slippage:.2f}% slippage and {sell_fee:.2f} fee) for {asset['quantity'] * (current_price * (1 - abs(sell_slippage))):.2f} € . Reason: {reason}"
+                f"(after {sell_slippage:.2f}% slippage and {sell_fee:.2f} fee) for {net_sale_value:.2f} € . Reason: {reason}"
             )
             del portfolio["assets"][symbol]
             low_volatility_assets.discard(symbol)
@@ -143,12 +413,9 @@ def sell_asset(
         finally:
             portfolio_lock.release()
 
-        # Post-sale actions
         try:
             if price_monitor_manager:
                 price_monitor_manager.stop(symbol)
-            else:
-                logger.warning(f"Price monitor manager is None for {symbol}. Cannot stop monitoring.")
             append_to_finished_trades_csv(finished_trade)
             telegram_notifier.notify_sell_trade(finished_trade)
         except Exception as e:
@@ -174,20 +441,6 @@ def sell_most_profitable_asset(
 ):
     """
     Sells the most profitable asset to free up a portfolio slot.
-
-    Args:
-        portfolio (dict): Portfolio dictionary.
-        portfolio_lock (Lock): Thread lock for portfolio updates.
-        percent_changes (pandas.DataFrame): DataFrame with price changes.
-        finished_trades (list): List to append finished trade record.
-        price_monitor_manager: Instance of PriceMonitorManager.
-        sell_slippages (dict): Dictionary of sell slippages for each asset (default: None).
-
-    Returns:
-        dict or None: Finished trade details if sold, else None.
-
-    Raises:
-        ValueError: If inputs are invalid.
     """
     try:
         if not isinstance(portfolio, dict) or "assets" not in portfolio:
@@ -269,10 +522,6 @@ def sell_most_profitable_asset(
 def save_portfolio():
     """
     Saves the current portfolio state to a JSON file and maintains only the 3 latest backup files atomically.
-
-    Raises:
-        ValueError: If portfolio data is invalid.
-        OSError: For file operation errors.
     """
     try:
         if not isinstance(portfolio, dict) or "cash" not in portfolio or "assets" not in portfolio:
@@ -304,18 +553,14 @@ def save_portfolio():
                 temp_file.flush()
                 os.fsync(temp_file.fileno())
             shutil.move(temp_file.name, file_path)
-            # logger.info(f"Saved portfolio to {file_path}")
 
-            # Save to backup file
             backup_file = f"{file_path}.backup_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}"
             with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.json') as temp_file:
                 json.dump(portfolio_copy, temp_file, indent=4)
                 temp_file.flush()
                 os.fsync(temp_file.fileno())
             shutil.move(temp_file.name, backup_file)
-            # logger.info(f"Saved portfolio backup to {backup_file}")
 
-            # Manage backup files: keep only the 3 latest
             backup_files = glob.glob(f"{file_path}.backup_*")
             backup_files.sort(key=lambda x: x.split("backup_")[-1], reverse=True)
             for old_file in backup_files[3:]:
@@ -345,16 +590,6 @@ def manage_portfolio(
 ):
     """
     Manages the portfolio by processing sell signals, updating assets, and buying new assets.
-
-    Args:
-        above_threshold_data (list): List of assets meeting price/volume thresholds.
-        percent_changes (pandas.DataFrame): DataFrame with price changes and OHLCV data.
-        price_monitor_manager: Instance of PriceMonitorManager.
-        order_book_metrics_list (list): List of order book metrics to update with buy decisions.
-        sell_slippages (dict): Dictionary of sell slippages for each asset (default: None).
-
-    Raises:
-        ValueError: If inputs are invalid.
     """
     try:
         # Input validation
@@ -371,6 +606,9 @@ def manage_portfolio(
         if sell_slippages is not None and not isinstance(sell_slippages, dict):
             raise ValueError("sell_slippages must be a dictionary")
 
+        # Initialize trading strategy
+        strategy = TradingStrategy()
+
         current_time = datetime.utcnow()
         five_min_ago = current_time - timedelta(minutes=5)
         finished_trades = []
@@ -380,18 +618,18 @@ def manage_portfolio(
         # Calculate sell slippage for all held assets
         sell_slippages = sell_slippages or {}
         for symbol in portfolio.get("assets", {}):
-            if symbol not in sell_slippages:  # Only calculate if not provided (e.g., not backtesting)
+            if symbol not in sell_slippages:
                 try:
                     amount_quote = portfolio["assets"][symbol]["quantity"] * portfolio["assets"][symbol]["current_price"]
                     metrics = calculate_order_book_metrics(symbol.replace("/", "-"), amount_quote=amount_quote)
                     if "error" not in metrics and metrics.get("slippage_sell") is not None:
-                        sell_slippages[symbol] = metrics["slippage_sell"]  # Negative percentage (e.g., -0.1 for -0.1%)
+                        sell_slippages[symbol] = metrics["slippage_sell"]
                     else:
                         logger.warning(f"Could not calculate sell slippage for {symbol}. Using default value.")
-                        sell_slippages[symbol] = -(config.config.MAX_SLIPPAGE_SELL + 0.1)  # Negative to prevent selling
+                        sell_slippages[symbol] = -(config.config.MAX_SLIPPAGE_SELL + 0.1)
                 except Exception as e:
                     logger.error(f"Error calculating sell slippage for {symbol}: {e}", exc_info=True)
-                    sell_slippages[symbol] = -(config.config.MAX_SLIPPAGE_SELL + 0.1)  # Negative to prevent selling
+                    sell_slippages[symbol] = -(config.config.MAX_SLIPPAGE_SELL + 0.1)
 
         if not portfolio_lock.acquire(timeout=5):
             logger.error("Timeout acquiring portfolio lock")
@@ -442,6 +680,7 @@ def manage_portfolio(
                     if trade:
                         finished_trades.append(trade)
 
+            # Process existing assets for sell decisions
             for symbol in list(portfolio.get("assets", {}).keys()):
                 asset = portfolio["assets"][symbol]
                 if (
@@ -451,7 +690,7 @@ def manage_portfolio(
                     price_monitor_manager.start(
                         symbol, portfolio, portfolio_lock, percent_changes
                     )
-                
+
                 current_price_series = percent_changes[percent_changes["symbol"] == symbol]["close_price"]
                 current_price = None
                 if current_price_series.empty:
@@ -464,7 +703,7 @@ def manage_portfolio(
                         continue
                 else:
                     current_price = float(current_price_series.iloc[0])
-                
+
                 asset["current_price"] = current_price
                 price_monitor_manager.last_prices[symbol] = current_price
                 purchase_price = asset.get("purchase_price", 0)
@@ -476,7 +715,7 @@ def manage_portfolio(
                     total_asset_value += asset_value
                     skipped_assets.append(symbol)
                     continue
-                
+
                 asset_value = asset["quantity"] * current_price
                 total_asset_value += asset_value
                 highest_price = max(asset.get("highest_price", purchase_price), current_price)
@@ -494,113 +733,29 @@ def manage_portfolio(
                     and "low" in symbol_candles.columns
                     else 0
                 )
-                trailing_stop = (
-                    (
-                        config.config.TRAILING_STOP_FACTOR_EARLY
-                        if holding_minutes < 15
-                        else config.config.TRAILING_STOP_FACTOR
-                    )
-                    * atr / purchase_price
-                    if atr > 0 and purchase_price > 0
-                    else 0.05
-                )
-                profit_target = (
-                    max(0.015, min(0.05, 1.2 * atr / purchase_price))
-                    if atr > 0 and purchase_price > 0
-                    else asset.get("profit_target", 0.015)
-                )
-                if (
-                    len(portfolio.get("assets", {})) >= config.config.ASSET_THRESHOLD
-                    and current_price > purchase_price * 1.01
-                ):
-                    profit_target = min(profit_target, config.config.ADJUSTED_PROFIT_TARGET)
-                asset["profit_target"] = profit_target
-                ema_period = calculate_dynamic_ema_period(
-                    holding_minutes,
-                    config.config.TIME_STOP_MINUTES,
-                    len(portfolio.get("assets", {})),
-                    config.config.ASSET_THRESHOLD,
-                )
-                ema_dynamic = (
-                    calculate_ema(symbol_candles["close"].values, ema_period)
-                    if len(symbol_candles) >= ema_period
-                    else current_price
-                )
                 momentum = (
                     percent_changes[percent_changes["symbol"] == symbol]["percent_change"].iloc[0]
                     if not percent_changes[percent_changes["symbol"] == symbol].empty
                     and "percent_change" in percent_changes.columns
                     else 0
                 )
-                if momentum < config.config.MOMENTUM_THRESHOLD:
-                    negative_momentum_counts[symbol] = negative_momentum_counts.get(symbol, 0) + 1
-                else:
-                    negative_momentum_counts[symbol] = 0
-                buy_fee = asset.get("buy_fee", 0)  # Get buy fee, default to 0 if not present
-                total_cost = purchase_price * asset["quantity"] + buy_fee
-                unrealized_profit = (
-                    ((current_price * asset["quantity"]) - total_cost) / total_cost
-                    if total_cost > 0
-                    else 0
-                )
-                trailing_loss = (
-                    (highest_price - current_price) / highest_price
-                    if highest_price > purchase_price
-                    else 0
-                )
-                sell_prices = []
-                profit_target_price = purchase_price * (1 + profit_target)
-                sell_prices.append(profit_target_price)
-                if highest_price > purchase_price:
-                    trailing_stop_price = highest_price * (1 - trailing_stop)
-                    if trailing_stop_price > purchase_price:
-                        sell_prices.append(trailing_stop_price)
-                asset["sell_price"] = min(sell_prices) if sell_prices else profit_target_price
-                catastrophic_loss = (
-                    unrealized_profit <= config.config.CAT_LOSS_THRESHOLD
-                    and abs(unrealized_profit) > 2 * atr / purchase_price
-                    if atr > 0 and purchase_price > 0
-                    else False
-                )
-                time_stop = (
-                    holding_minutes >= config.config.TIME_STOP_MINUTES and unrealized_profit < 0
-                )
-                multiplied_profit_target = (
-                    unrealized_profit >= config.config.PROFIT_TARGET_MULTIPLIER * profit_target
-                )
-                regular_sell_signal = (
-                    holding_minutes >= config.config.MIN_HOLDING_MINUTES
-                    and (
-                        trailing_loss >= trailing_stop
-                        or unrealized_profit >= profit_target
-                        or negative_momentum_counts.get(symbol, 0)
-                        >= config.config.MOMENTUM_CONFIRM_MINUTES
-                    )
-                )
+                sell_data = {
+                    "symbol": symbol,
+                    "current_price": current_price,
+                    "purchase_price": purchase_price,
+                    "highest_price": highest_price,
+                    "holding_minutes": holding_minutes,
+                    "atr": atr,
+                    "momentum": momentum,
+                    "near_threshold": len(portfolio.get("assets", {})) >= config.config.ASSET_THRESHOLD
+                }
+                sell_signal, sell_results, reason = strategy.evaluate_sell(sell_data)
                 sell_slippage = sell_slippages.get(symbol, config.config.MAX_SLIPPAGE_SELL + 0.1)
-                slippage_ok = abs(sell_slippage) <= abs(config.config.MAX_SLIPPAGE_SELL)
-                sell_signal = (
-                    (multiplied_profit_target or regular_sell_signal or catastrophic_loss or time_stop)
-                    and slippage_ok
-                )
                 if sell_signal:
-                    reason = (
-                        "Catastrophic loss" if catastrophic_loss else
-                        "Time stop" if time_stop else
-                        f"Multiplied profit target ({config.config.PROFIT_TARGET_MULTIPLIER}x = {(config.config.PROFIT_TARGET_MULTIPLIER * profit_target)*100:.1f}%)"
-                        if multiplied_profit_target else
-                        "Trailing stop" if trailing_loss >= trailing_stop else
-                        f"Dynamic profit target ({profit_target*100:.1f}%)" if unrealized_profit >= profit_target else
-                        "Negative momentum"
-                    )
                     logger.info(
                         f"Evaluation Decision for {symbol}: Selling due to {reason}. "
                         f"Current: {current_price:.4f}, Highest: {highest_price:.4f}, "
-                        f"Trailing Loss: {trailing_loss:.4f}, ATR Stop: {trailing_stop:.4f}, "
-                        f"Profit/Loss: {unrealized_profit:.4f}, Profit Target: {profit_target:.4f}, "
-                        f"EMA_{ema_period}: {ema_dynamic:.2f}, "
-                        f"Holding: {holding_minutes:.2f} min, Neg Momentum Count: {negative_momentum_counts.get(symbol, 0)}, "
-                        f"Sell Slippage: {sell_slippage:.2f}%"
+                        f"Holding: {holding_minutes:.2f} min, Sell Slippage: {sell_slippage:.2f}%"
                     )
                     trade = sell_asset(
                         symbol,
@@ -616,65 +771,47 @@ def manage_portfolio(
                     if trade:
                         finished_trades.append(trade)
                 else:
-                    if not slippage_ok:
-                        logger.info(
-                            f"Delaying sell for {symbol}: Sell slippage {sell_slippage:.2f}% exceeds threshold {config.config.MAX_SLIPPAGE_SELL:.2f}%"
-                        )
-                    # Log asset statistics including sell slippage
                     logger.info(
-                        f"Asset: {symbol}, "
-                        f"Current: {current_price:.4f}, "
-                        f"Purchase: {purchase_price:.4f}, "
-                        f"Quantity: {asset['quantity']:.4f}, "
-                        f"Unrealized P/L: {unrealized_profit*100:.2f}%, "
-                        f"Sell Slippage: {sell_slippage:.2f}%, "
+                        f"Asset: {symbol}, Current: {current_price:.4f}, "
+                        f"Purchase: {purchase_price:.4f}, Quantity: {asset['quantity']:.4f}, "
                         f"Holding: {holding_minutes:.2f} min"
                     )
 
-            # Buy new assets and update order book metrics
+            # Buy new assets
             for record in above_threshold_data:
                 if not isinstance(record, dict) or "symbol" not in record or "close_price" not in record:
                     logger.warning(f"Invalid record in above_threshold_data: {record}")
                     continue
                 symbol = record["symbol"]
-                total_score = 0.0
-                slippage_buy = 0.0
-                metrics_found = False
-                for metrics in order_book_metrics_list:
-                    if metrics.get("market") == symbol.replace("/", "-"):
-                        total_score = metrics.get("total_score", 0)
-                        slippage_buy = metrics.get("slippage_buy", float("inf"))
-                        metrics_found = True
-                if not metrics_found:
-                    logger.warning(f"No matching metrics found for {symbol} in order_book_metrics_list")
+                metrics = next((m for m in order_book_metrics_list if m.get("market") == symbol.replace("/", "-")), {})
+                if not metrics:
+                    logger.warning(f"No matching metrics found for {symbol}")
                     continue
-                logger.debug(f"Evaluating buy for {symbol}: cash={portfolio.get('cash', 0):.2f}, "
-                            f"required_cash={config.config.PORTFOLIO_VALUE * config.config.ALLOCATION_PER_TRADE:.2f}, "
-                            f"assets={len(portfolio.get('assets', {}))}, max_assets={config.config.MAX_ACTIVE_ASSETS}, "
-                            f"low_volatility={symbol in low_volatility_assets}, "
-                            f"total_score={total_score:.2f}, min_score={config.config.MIN_TOTAL_SCORE:.2f}, "
-                            f"slippage_buy={slippage_buy:.3f}%, max_slippage={config.config.MAX_SLIPPAGE_BUY:.3f}%")
+                buy_data = {
+                    "symbol": symbol,
+                    "slippage_buy": metrics.get("slippage_buy", float("inf")),
+                    "total_score": metrics.get("total_score", 0.0)
+                }
+                can_buy, buy_results = strategy.evaluate_buy(buy_data)
+                logger.debug(f"Evaluating buy for {symbol}: can_buy={can_buy}, results={buy_results}")
                 if (
-                    symbol not in portfolio.get("assets", {})
+                    can_buy
+                    and symbol not in portfolio.get("assets", {})
                     and portfolio.get("cash", 0) >= config.config.PORTFOLIO_VALUE * config.config.ALLOCATION_PER_TRADE
                     and len(portfolio.get("assets", {})) < config.config.MAX_ACTIVE_ASSETS
                     and symbol not in low_volatility_assets
-                    and total_score >= config.config.MIN_TOTAL_SCORE
-                    and slippage_buy <= config.config.MAX_SLIPPAGE_BUY
                 ):
                     close_price = record["close_price"]
+                    slippage_buy = metrics.get("slippage_buy", 0.0)
                     purchase_price = close_price * (1 + slippage_buy / 100)
                     allocation = config.config.PORTFOLIO_VALUE * config.config.ALLOCATION_PER_TRADE
                     buy_fee = allocation * config.config.BUY_FEE
                     net_allocation = allocation - buy_fee
                     quantity = net_allocation / purchase_price if purchase_price > 0 else 0
-                    logger.debug(f"Buy calc for {symbol}: close_price={close_price:.4f}, purchase_price={purchase_price:.4f}, "
-                                f"allocation={allocation:.2f}, buy_fee={buy_fee:.2f}, net_allocation={net_allocation:.2f}, "
-                                f"quantity={quantity:.4f}")
                     if quantity <= 0:
                         logger.warning(f"Cannot buy {symbol}: Invalid quantity {quantity}")
                         continue
-                    actual_cost = quantity * purchase_price  # Actual cost including slippage
+                    actual_cost = quantity * purchase_price
                     try:
                         trade_count, largest_trade_volume_eur = fetch_trade_details_with_retry(
                             symbol, five_min_ago, current_time
@@ -700,20 +837,19 @@ def manage_portfolio(
                         "quantity": quantity,
                         "purchase_price": purchase_price,
                         "purchase_time": current_time,
-                        "buy_slippage": slippage_buy,  # Store positive percentage
-                        "buy_fee": buy_fee,  # Add this line
+                        "buy_slippage": slippage_buy,
+                        "buy_fee": buy_fee,
                         "highest_price": purchase_price,
-                        "current_price": close_price,  # Use close_price for current valuation
+                        "current_price": close_price,
                         "profit_target": config.config.PROFIT_TARGET,
                         "original_profit_target": config.config.PROFIT_TARGET,
                         "sell_price": purchase_price * (1 + config.config.PROFIT_TARGET),
                     }
                     portfolio["cash"] -= allocation
-                    total_asset_value += (quantity * close_price)  # Use original price for valuation
+                    total_asset_value += (quantity * close_price)
                     logger.info(
                         f"Bought {quantity:.4f} {symbol} at {purchase_price:.4f} EUR (close {close_price:.4f}) "
-                        f"for {actual_cost:.2f} EUR (after {slippage_buy:.2f}% slippage and {buy_fee:.2f} fee), "
-                        f"Trade Count: {trade_count}, Largest Trade Volume: €{largest_trade_volume_eur:.2f}"
+                        f"for {actual_cost:.2f} EUR (after {slippage_buy:.2f}% slippage and {buy_fee:.2f} fee)"
                     )
                     for metrics in order_book_metrics_list:
                         if metrics.get("market") == symbol.replace("/", "-"):
@@ -721,109 +857,44 @@ def manage_portfolio(
                     price_monitor_manager.start(
                         symbol, portfolio, portfolio_lock, percent_changes
                     )
-                elif len(portfolio.get("assets", {})) >= config.config.MAX_ACTIVE_ASSETS:
-                    logger.warning(
-                        f"Cannot buy {symbol}: Maximum active assets ({config.config.MAX_ACTIVE_ASSETS}) reached."
-                    )
-                    trade = sell_most_profitable_asset(
-                        portfolio,
-                        portfolio_lock,
-                        percent_changes,
-                        finished_trades,
-                        price_monitor_manager,
-                        sell_slippages,
-                    )
-                    if trade:
-                        finished_trades.append(trade)
-                elif slippage_buy >= config.config.MAX_SLIPPAGE_BUY:
-                    logger.info(
-                        f"Cannot buy {symbol}: Slippage Buy {slippage_buy:.2f}% is above threshold ({config.config.MAX_SLIPPAGE_BUY:.2f}%)."
-                    )
-                elif total_score <= config.config.MIN_TOTAL_SCORE:
-                    logger.info(
-                        f"Cannot buy {symbol}: Total Score {total_score:.2f} is below threshold {config.config.MIN_TOTAL_SCORE:.2f}."
-                    )
-                elif symbol in portfolio.get("assets", {}):
-                    logger.debug(f"Cannot buy {symbol}: Already owned.")
-                elif symbol in low_volatility_assets:
-                    logger.debug(f"Cannot buy {symbol}: Marked as low volatility.")
                 else:
-                    logger.info(f"Cannot buy {symbol}: Conditions not met - "
-                    f"in_portfolio={symbol in portfolio.get('assets', {})}, "
-                    f"sufficient_cash={portfolio.get('cash', 0) >= config.config.PORTFOLIO_VALUE * config.config.ALLOCATION_PER_TRADE}, "
-                    f"asset_limit={len(portfolio.get('assets', {})) < config.config.MAX_ACTIVE_ASSETS}, "
-                    f"low_volatility={symbol in low_volatility_assets}, "
-                    f"total_score={total_score:.2f} >= {config.config.MIN_TOTAL_SCORE}, "
-                    f"slippage_buy={slippage_buy:.3f}% <= {config.config.MAX_SLIPPAGE_BUY}%")
+                    logger.info(
+                        f"Cannot buy {symbol}: Conditions not met - "
+                        f"can_buy={can_buy}, "
+                        f"in_portfolio={symbol in portfolio.get('assets', {})}, "
+                        f"sufficient_cash={portfolio.get('cash', 0) >= config.config.PORTFOLIO_VALUE * config.config.ALLOCATION_PER_TRADE}, "
+                        f"asset_limit={len(portfolio.get('assets', {})) < config.config.MAX_ACTIVE_ASSETS}, "
+                        f"low_volatility={symbol in low_volatility_assets}"
+                    )
+                    if len(portfolio.get("assets", {})) >= config.config.MAX_ACTIVE_ASSETS:
+                        trade = sell_most_profitable_asset(
+                            portfolio,
+                            portfolio_lock,
+                            percent_changes,
+                            finished_trades,
+                            price_monitor_manager,
+                            sell_slippages,
+                        )
+                        if trade:
+                            finished_trades.append(trade)
         finally:
             portfolio_lock.release()
+
+        if order_book_metrics_list:
+            append_to_order_book_metrics_csv(order_book_metrics_list)
+
+        total_portfolio_value = portfolio.get("cash", 0) + total_asset_value
+        portfolio_values.append({"timestamp": datetime.utcnow().isoformat(), "portfolio_value": total_portfolio_value})
+        if skipped_assets:
+            logger.warning(
+                f"Portfolio value may be inaccurate due to missing prices for: {', '.join(skipped_assets)}"
+            )
     except ValueError as e:
         logger.error(f"Validation error in portfolio management: {e}", exc_info=True)
         send_alert("Portfolio Management Failure", f"Validation error: {e}")
-        return
     except Exception as e:
         logger.error(f"Unexpected error in portfolio management: {e}", exc_info=True)
         send_alert("Portfolio Management Failure", f"Unexpected error: {e}")
-        return
-
-    # Save order book metrics to CSV
-    try:
-        if order_book_metrics_list:
-            append_to_order_book_metrics_csv(order_book_metrics_list)
-    except Exception as e:
-        logger.error(f"Error saving order book metrics: {e}", exc_info=True)
-        send_alert("Order Book Metrics Save Failure", f"Error saving order book metrics: {e}")
-
-    total_portfolio_value = portfolio.get("cash", 0) + total_asset_value
-    portfolio_values.append({"timestamp": datetime.utcnow().isoformat(), "portfolio_value": total_portfolio_value})
-    if skipped_assets:
-        logger.warning(
-            f"Portfolio value may be inaccurate due to missing prices for: {', '.join(skipped_assets)}"
-        )
-    # logger.info(
-    #     f"Portfolio: Cash: {portfolio.get('cash', 0):.2f} EUR, Assets: {len(portfolio.get('assets', {}))}, Total Value: {total_portfolio_value:.2f} EUR"
-    # )
-    # Add these notification calls here
-    if not hasattr(telegram_notifier, 'last_summary_time') or \
-    (datetime.utcnow() - telegram_notifier.last_summary_time).total_seconds() >= 3600:
-        telegram_notifier.notify_portfolio_summary(portfolio)
-        telegram_notifier.last_summary_time = datetime.utcnow()
-
-    if (datetime.utcnow() - getattr(telegram_notifier, 'last_pinned_time', datetime.utcnow())).total_seconds() >= 60:
-        asyncio.run_coroutine_threadsafe(
-            telegram_notifier.update_pinned_summary(portfolio),
-            asyncio.get_event_loop()
-        )
-        telegram_notifier.last_pinned_time = datetime.utcnow()
-
-    if (datetime.utcnow() - getattr(telegram_notifier, 'last_chart_time', datetime.utcnow())).total_seconds() >= 86400:
-        asyncio.run_coroutine_threadsafe(
-            telegram_notifier.notify_performance_chart(portfolio_values),
-            asyncio.get_event_loop()
-        )
-        telegram_notifier.last_chart_time = datetime.utcnow()
-
-    if (datetime.utcnow() - getattr(telegram_notifier, 'last_allocation_time', datetime.utcnow())).total_seconds() >= 86400:
-        asyncio.run_coroutine_threadsafe(
-            telegram_notifier.notify_asset_allocation(portfolio),
-            asyncio.get_event_loop()
-        )
-        telegram_notifier.last_allocation_time = datetime.utcnow()
-
-    if datetime.utcnow().hour == 0 and (not hasattr(telegram_notifier, 'last_report_date') or \
-    datetime.utcnow().date() != telegram_notifier.last_report_date):
-        asyncio.run_coroutine_threadsafe(
-            telegram_notifier.notify_daily_report(),
-            asyncio.get_event_loop()
-        )
-        telegram_notifier.last_report_date = datetime.utcnow().date()
 
 def send_alert(subject, message):
-    """
-    Sends an alert for critical errors (placeholder).
-
-    Args:
-        subject (str): The subject of the alert.
-        message (str): The alert message.
-    """
     telegram_notifier.notify_error(subject, message)
