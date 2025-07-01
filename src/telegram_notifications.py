@@ -1,22 +1,25 @@
 # trading_bot/telegram_notifications.py
 import asyncio
+import io
+import json
 import logging
 import os
+import time
 from datetime import datetime
 from queue import Queue
-import time
-import json
-from typing import Dict, Optional, List
-from telegram import Bot, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.error import TelegramError, RetryAfter
-from telegram.ext import Application, CallbackQueryHandler
-from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+from typing import Dict, List, Optional
+
 import matplotlib.pyplot as plt
-import io
 import pandas as pd
-from telegram import InputFile
+from telegram import Bot, InlineKeyboardButton, InlineKeyboardMarkup, InputFile
+from telegram.error import RetryAfter, TelegramError
+from telegram.ext import Application, CallbackQueryHandler
+from tenacity import (retry, retry_if_exception_type, stop_after_attempt,
+                      wait_exponential)
+
 from . import config
 from .config import logger
+
 
 class TelegramNotifier:
     """
@@ -24,6 +27,7 @@ class TelegramNotifier:
     Includes inline keyboards, charts, pinned messages, performance alerts, and daily reports.
     Ensures non-blocking notifications with queuing and rate limiting.
     """
+
     def __init__(self, bot_token: str, chat_id: str):
         """
         Initializes the TelegramNotifier with bot token and chat ID.
@@ -37,7 +41,9 @@ class TelegramNotifier:
         self.bot = Bot(token=bot_token)
         self.queue = Queue()
         self.running = False
-        self.rate_limit_delay = 3  # Seconds to wait between messages to avoid rate limits
+        self.rate_limit_delay = (
+            3  # Seconds to wait between messages to avoid rate limits
+        )
         self.logger = logger  # Reuse bot's logger
         self.pinned_message_id = None  # Store pinned message ID
         self.application = Application.builder().token(bot_token).build()
@@ -54,7 +60,9 @@ class TelegramNotifier:
         if not self.running:
             self.running = True
             asyncio.create_task(self._process_queue())
-            self.application.run_polling(drop_pending_updates=True, stop_signals=[])  # Non-blocking
+            self.application.run_polling(
+                drop_pending_updates=True, stop_signals=[]
+            )  # Non-blocking
             self.logger.info("TelegramNotifier started with queue and callback polling")
 
     async def stop(self):
@@ -75,17 +83,25 @@ class TelegramNotifier:
                 if len(item) == 2:  # Text message
                     message, is_html = item
                     try:
-                        await self._send_message_with_retry(message, parse_mode='HTML' if is_html else None)
+                        await self._send_message_with_retry(
+                            message, parse_mode="HTML" if is_html else None
+                        )
                         self.logger.debug(f"Sent Telegram message: {message[:50]}...")
                     except Exception as e:
-                        self.logger.error(f"Failed to send Telegram message: {e}", exc_info=True)
+                        self.logger.error(
+                            f"Failed to send Telegram message: {e}", exc_info=True
+                        )
                 elif len(item) == 3:  # Photo (chart)
                     photo, caption, is_html = item
                     try:
-                        await self._send_photo_with_retry(photo, caption, parse_mode='HTML' if is_html else None)
+                        await self._send_photo_with_retry(
+                            photo, caption, parse_mode="HTML" if is_html else None
+                        )
                         self.logger.debug(f"Sent Telegram photo: {caption[:50]}...")
                     except Exception as e:
-                        self.logger.error(f"Failed to send Telegram photo: {e}", exc_info=True)
+                        self.logger.error(
+                            f"Failed to send Telegram photo: {e}", exc_info=True
+                        )
                 await asyncio.sleep(self.rate_limit_delay)
             else:
                 await asyncio.sleep(1)
@@ -96,9 +112,11 @@ class TelegramNotifier:
         retry=retry_if_exception_type((TelegramError, RetryAfter)),
         before_sleep=lambda retry_state: logger.debug(
             f"Retrying Telegram message send after attempt {retry_state.attempt_number}"
-        )
+        ),
     )
-    async def _send_message_with_retry(self, message: str, parse_mode: Optional[str] = None):
+    async def _send_message_with_retry(
+        self, message: str, parse_mode: Optional[str] = None
+    ):
         """
         Sends a message with inline keyboard and retry logic.
 
@@ -108,11 +126,11 @@ class TelegramNotifier:
         """
         keyboard = [
             [
-                InlineKeyboardButton("Portfolio", callback_data='portfolio'),
-                InlineKeyboardButton("Trades", callback_data='trades'),
-                InlineKeyboardButton("Stats", callback_data='stats'),
+                InlineKeyboardButton("Portfolio", callback_data="portfolio"),
+                InlineKeyboardButton("Trades", callback_data="trades"),
+                InlineKeyboardButton("Stats", callback_data="stats"),
             ],
-            [InlineKeyboardButton("Logs", callback_data='logs')]
+            [InlineKeyboardButton("Logs", callback_data="logs")],
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         try:
@@ -120,10 +138,12 @@ class TelegramNotifier:
                 chat_id=self.chat_id,
                 text=message,
                 parse_mode=parse_mode,
-                reply_markup=reply_markup
+                reply_markup=reply_markup,
             )
         except RetryAfter as e:
-            self.logger.warning(f"Telegram rate limit hit, retrying after {e.retry_after} seconds")
+            self.logger.warning(
+                f"Telegram rate limit hit, retrying after {e.retry_after} seconds"
+            )
             await asyncio.sleep(e.retry_after)
             raise
         except TelegramError as e:
@@ -136,9 +156,11 @@ class TelegramNotifier:
         retry=retry_if_exception_type((TelegramError, RetryAfter)),
         before_sleep=lambda retry_state: logger.debug(
             f"Retrying Telegram photo send after attempt {retry_state.attempt_number}"
-        )
+        ),
     )
-    async def _send_photo_with_retry(self, photo: InputFile, caption: str, parse_mode: Optional[str] = None):
+    async def _send_photo_with_retry(
+        self, photo: InputFile, caption: str, parse_mode: Optional[str] = None
+    ):
         """
         Sends a photo with retry logic.
 
@@ -152,10 +174,12 @@ class TelegramNotifier:
                 chat_id=self.chat_id,
                 photo=photo,
                 caption=caption,
-                parse_mode=parse_mode
+                parse_mode=parse_mode,
             )
         except RetryAfter as e:
-            self.logger.warning(f"Telegram rate limit hit, retrying after {e.retry_after} seconds")
+            self.logger.warning(
+                f"Telegram rate limit hit, retrying after {e.retry_after} seconds"
+            )
             await asyncio.sleep(e.retry_after)
             raise
         except TelegramError as e:
@@ -167,13 +191,21 @@ class TelegramNotifier:
         try:
             query = update.callback_query
             data = query.data
-            if data == 'portfolio':
-                with open(config.config.PORTFOLIO_FILE, 'r') as f:
+            if data == "portfolio":
+                with open(config.config.PORTFOLIO_FILE, "r") as f:
                     portfolio = json.load(f)
                 self.notify_portfolio_summary(portfolio)
-            elif data == 'trades':
-                buy_trades = pd.read_csv(config.config.BUY_TRADES_CSV).tail(5).to_dict(orient='records')
-                finished_trades = pd.read_csv(config.config.FINISHED_TRADES_CSV).tail(5).to_dict(orient='records')
+            elif data == "trades":
+                buy_trades = (
+                    pd.read_csv(config.config.BUY_TRADES_CSV)
+                    .tail(5)
+                    .to_dict(orient="records")
+                )
+                finished_trades = (
+                    pd.read_csv(config.config.FINISHED_TRADES_CSV)
+                    .tail(5)
+                    .to_dict(orient="records")
+                )
                 message = "<b>Recent Trades</b>\n"
                 if buy_trades:
                     message += "\n<b>Buy Trades:</b>\n"
@@ -190,12 +222,26 @@ class TelegramNotifier:
                             f"({trade['Sell Time']}, Reason: {trade['Reason']})\n"
                         )
                 self.queue.put((message, True))
-            elif data == 'stats':
+            elif data == "stats":
                 finished_trades = pd.read_csv(config.config.FINISHED_TRADES_CSV)
                 total_trades = len(finished_trades)
-                win_rate = len(finished_trades[finished_trades['Profit/Loss'].astype(float) > 0]) / total_trades * 100 if total_trades > 0 else 0
-                total_pl = finished_trades['Profit/Loss'].astype(float).sum()
-                avg_pl = finished_trades['Profit/Loss'].astype(float).mean() if total_trades > 0 else 0
+                win_rate = (
+                    len(
+                        finished_trades[
+                            finished_trades["Profit/Loss"].astype(float) > 0
+                        ]
+                    )
+                    / total_trades
+                    * 100
+                    if total_trades > 0
+                    else 0
+                )
+                total_pl = finished_trades["Profit/Loss"].astype(float).sum()
+                avg_pl = (
+                    finished_trades["Profit/Loss"].astype(float).mean()
+                    if total_trades > 0
+                    else 0
+                )
                 message = (
                     "<b>Performance Stats</b>\n"
                     f"Total Trades: {total_trades}\n"
@@ -204,10 +250,10 @@ class TelegramNotifier:
                     f"Average Profit/Loss: €{avg_pl:.2f}"
                 )
                 self.queue.put((message, True))
-            elif data == 'logs':
-                log_file = 'trading_bot.log'
+            elif data == "logs":
+                log_file = "trading_bot.log"
                 if os.path.exists(log_file):
-                    with open(log_file, 'r') as f:
+                    with open(log_file, "r") as f:
                         lines = f.readlines()[-10:]  # Last 10 lines
                     message = "<b>Recent Logs</b>\n" + "".join(lines)
                     self.queue.put((message, False))
@@ -239,9 +285,13 @@ class TelegramNotifier:
                 f"Largest Trade: €{float(trade_data['Largest Trade Volume EUR']):.2f}"
             )
             self.queue.put((message, True))
-            self.logger.debug(f"Queued buy trade notification for {trade_data['Symbol']}")
+            self.logger.debug(
+                f"Queued buy trade notification for {trade_data['Symbol']}"
+            )
         except Exception as e:
-            self.logger.error(f"Error queuing buy trade notification: {e}", exc_info=True)
+            self.logger.error(
+                f"Error queuing buy trade notification: {e}", exc_info=True
+            )
 
     def notify_sell_trade(self, trade_data: Dict):
         """
@@ -251,7 +301,7 @@ class TelegramNotifier:
             trade_data (Dict): Dictionary containing sell trade details.
         """
         try:
-            profit_loss = float(trade_data['Profit/Loss'])
+            profit_loss = float(trade_data["Profit/Loss"])
             message = (
                 "<b>Sell Trade Executed</b>\n"
                 f"Symbol: {trade_data['Symbol']}\n"
@@ -264,9 +314,13 @@ class TelegramNotifier:
                 f"Reason: {trade_data['Reason']}"
             )
             self.queue.put((message, True))
-            self.logger.debug(f"Queued sell trade notification for {trade_data['Symbol']}")
+            self.logger.debug(
+                f"Queued sell trade notification for {trade_data['Symbol']}"
+            )
         except Exception as e:
-            self.logger.error(f"Error queuing sell trade notification: {e}", exc_info=True)
+            self.logger.error(
+                f"Error queuing sell trade notification: {e}", exc_info=True
+            )
 
     def notify_portfolio_summary(self, portfolio: Dict):
         """
@@ -277,10 +331,10 @@ class TelegramNotifier:
         """
         try:
             total_asset_value = sum(
-                asset['quantity'] * asset['current_price']
-                for asset in portfolio.get('assets', {}).values()
+                asset["quantity"] * asset["current_price"]
+                for asset in portfolio.get("assets", {}).values()
             )
-            total_value = portfolio.get('cash', 0) + total_asset_value
+            total_value = portfolio.get("cash", 0) + total_asset_value
             message = (
                 "<b>Portfolio Summary</b>\n"
                 f"Cash: €{portfolio.get('cash', 0):.2f}\n"
@@ -288,12 +342,14 @@ class TelegramNotifier:
                 f"Total Value: €{total_value:.2f}\n"
                 f"Time: {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')}"
             )
-            if portfolio.get('assets'):
+            if portfolio.get("assets"):
                 message += "\n<b>Assets:</b>\n"
-                for symbol, asset in portfolio.get('assets', {}).items():
+                for symbol, asset in portfolio.get("assets", {}).items():
                     unrealized_profit = (
-                        (asset['current_price'] - asset['purchase_price']) / asset['purchase_price']
-                        if asset['purchase_price'] > 0 else 0
+                        (asset["current_price"] - asset["purchase_price"])
+                        / asset["purchase_price"]
+                        if asset["purchase_price"] > 0
+                        else 0
                     )
                     message += (
                         f"{symbol}: {asset['quantity']:.4f} @ €{asset['current_price']:.4f} "
@@ -302,7 +358,9 @@ class TelegramNotifier:
             self.queue.put((message, True))
             self.logger.debug("Queued portfolio summary notification")
         except Exception as e:
-            self.logger.error(f"Error queuing portfolio summary notification: {e}", exc_info=True)
+            self.logger.error(
+                f"Error queuing portfolio summary notification: {e}", exc_info=True
+            )
 
     def notify_error(self, subject: str, message: str):
         """
@@ -330,19 +388,25 @@ class TelegramNotifier:
             if not portfolio_values:
                 self.queue.put(("<b>No portfolio data available for chart</b>", True))
                 return
-            times = [datetime.fromisoformat(v['timestamp']) for v in portfolio_values]
-            values = [v['portfolio_value'] for v in portfolio_values]
+            times = [datetime.fromisoformat(v["timestamp"]) for v in portfolio_values]
+            values = [v["portfolio_value"] for v in portfolio_values]
             plt.figure(figsize=(8, 4))
-            plt.plot(times, values, label='Portfolio Value (€)')
-            plt.xlabel('Time')
-            plt.ylabel('Value (€)')
-            plt.title('Portfolio Value Over Time')
+            plt.plot(times, values, label="Portfolio Value (€)")
+            plt.xlabel("Time")
+            plt.ylabel("Value (€)")
+            plt.title("Portfolio Value Over Time")
             plt.legend()
             plt.grid(True)
             buf = io.BytesIO()
-            plt.savefig(buf, format='png')
+            plt.savefig(buf, format="png")
             buf.seek(0)
-            self.queue.put((InputFile(buf, filename='portfolio.png'), "<b>Portfolio Value Chart</b>", True))
+            self.queue.put(
+                (
+                    InputFile(buf, filename="portfolio.png"),
+                    "<b>Portfolio Value Chart</b>",
+                    True,
+                )
+            )
             plt.close()
             self.logger.debug("Queued portfolio chart")
         except Exception as e:
@@ -357,27 +421,35 @@ class TelegramNotifier:
             portfolio (Dict): Portfolio data with assets.
         """
         try:
-            assets = portfolio.get('assets', {})
+            assets = portfolio.get("assets", {})
             if not assets:
                 self.queue.put(("<b>No assets for allocation chart</b>", True))
                 return
             labels = []
             sizes = []
             for symbol, asset in assets.items():
-                value = asset['quantity'] * asset['current_price']
+                value = asset["quantity"] * asset["current_price"]
                 labels.append(symbol)
                 sizes.append(value)
             plt.figure(figsize=(6, 6))
-            plt.pie(sizes, labels=labels, autopct='%1.1f%%', startangle=140)
-            plt.title('Portfolio Asset Allocation')
+            plt.pie(sizes, labels=labels, autopct="%1.1f%%", startangle=140)
+            plt.title("Portfolio Asset Allocation")
             buf = io.BytesIO()
-            plt.savefig(buf, format='png')
+            plt.savefig(buf, format="png")
             buf.seek(0)
-            self.queue.put((InputFile(buf, filename='allocation.png'), "<b>Asset Allocation</b>", True))
+            self.queue.put(
+                (
+                    InputFile(buf, filename="allocation.png"),
+                    "<b>Asset Allocation</b>",
+                    True,
+                )
+            )
             plt.close()
             self.logger.debug("Queued asset allocation chart")
         except Exception as e:
-            self.logger.error(f"Error queuing asset allocation chart: {e}", exc_info=True)
+            self.logger.error(
+                f"Error queuing asset allocation chart: {e}", exc_info=True
+            )
             self.queue.put((f"<b>Error generating chart: {e}</b>", True))
 
     async def update_pinned_summary(self, portfolio: Dict):
@@ -389,10 +461,10 @@ class TelegramNotifier:
         """
         try:
             total_asset_value = sum(
-                asset['quantity'] * asset['current_price']
-                for asset in portfolio.get('assets', {}).values()
+                asset["quantity"] * asset["current_price"]
+                for asset in portfolio.get("assets", {}).values()
             )
-            total_value = portfolio.get('cash', 0) + total_asset_value
+            total_value = portfolio.get("cash", 0) + total_asset_value
             message = (
                 "<b>Portfolio Summary (Pinned)</b>\n"
                 f"Cash: €{portfolio.get('cash', 0):.2f}\n"
@@ -400,13 +472,13 @@ class TelegramNotifier:
                 f"Total Value: €{total_value:.2f}\n"
                 f"Updated: {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')}"
             )
-            if hasattr(self, 'pinned_message_id'):
+            if hasattr(self, "pinned_message_id"):
                 try:
                     await self.bot.edit_message_text(
                         chat_id=self.chat_id,
                         message_id=self.pinned_message_id,
                         text=message,
-                        parse_mode='HTML'
+                        parse_mode="HTML",
                     )
                     self.logger.debug("Updated pinned portfolio summary")
                     return
@@ -414,14 +486,12 @@ class TelegramNotifier:
                     self.logger.warning(f"Failed to update pinned message: {e}")
             # Pin a new message if none exists or update fails
             sent_message = await self.bot.send_message(
-                chat_id=self.chat_id,
-                text=message,
-                parse_mode='HTML'
+                chat_id=self.chat_id, text=message, parse_mode="HTML"
             )
             await self.bot.pin_chat_message(
                 chat_id=self.chat_id,
                 message_id=sent_message.message_id,
-                disable_notification=True
+                disable_notification=True,
             )
             self.pinned_message_id = sent_message.message_id
             self.logger.debug("Pinned new portfolio summary")
@@ -429,7 +499,9 @@ class TelegramNotifier:
             self.logger.error(f"Error updating pinned summary: {e}", exc_info=True)
             self.queue.put((f"<b>Error updating pinned summary: {e}</b>", True))
 
-    async def notify_performance_alert(self, portfolio: Dict, finished_trades: pd.DataFrame):
+    async def notify_performance_alert(
+        self, portfolio: Dict, finished_trades: pd.DataFrame
+    ):
         """
         Sends alerts for performance thresholds.
 
@@ -439,12 +511,16 @@ class TelegramNotifier:
         """
         try:
             total_asset_value = sum(
-                asset['quantity'] * asset['current_price']
-                for asset in portfolio.get('assets', {}).values()
+                asset["quantity"] * asset["current_price"]
+                for asset in portfolio.get("assets", {}).values()
             )
-            total_value = portfolio.get('cash', 0) + total_asset_value
+            total_value = portfolio.get("cash", 0) + total_asset_value
             initial_value = config.config.PORTFOLIO_VALUE
-            value_change = (total_value - initial_value) / initial_value * 100 if initial_value > 0 else 0
+            value_change = (
+                (total_value - initial_value) / initial_value * 100
+                if initial_value > 0
+                else 0
+            )
             if abs(value_change) >= 5:
                 message = (
                     f"<b>Portfolio Alert</b>\n"
@@ -454,7 +530,7 @@ class TelegramNotifier:
                 self.queue.put((message, True))
             if not finished_trades.empty:
                 recent_trade = finished_trades.iloc[-1]
-                pl = float(recent_trade['Profit/Loss'])
+                pl = float(recent_trade["Profit/Loss"])
                 if pl <= -100:
                     message = (
                         f"<b>Trade Loss Alert</b>\n"
@@ -463,7 +539,15 @@ class TelegramNotifier:
                         f"Time: {recent_trade['Sell Time']}"
                     )
                     self.queue.put((message, True))
-                win_rate = len(finished_trades[finished_trades['Profit/Loss'].astype(float) > 0]) / len(finished_trades) * 100
+                win_rate = (
+                    len(
+                        finished_trades[
+                            finished_trades["Profit/Loss"].astype(float) > 0
+                        ]
+                    )
+                    / len(finished_trades)
+                    * 100
+                )
                 if win_rate < 50 and len(finished_trades) >= 10:
                     message = (
                         f"<b>Performance Alert</b>\n"
@@ -473,7 +557,9 @@ class TelegramNotifier:
                     self.queue.put((message, True))
             self.logger.debug("Checked performance thresholds")
         except Exception as e:
-            self.logger.error(f"Error checking performance thresholds: {e}", exc_info=True)
+            self.logger.error(
+                f"Error checking performance thresholds: {e}", exc_info=True
+            )
             self.queue.put((f"<b>Error checking performance thresholds: {e}</b>", True))
 
     async def notify_daily_report(self):
@@ -483,12 +569,19 @@ class TelegramNotifier:
         try:
             finished_trades = pd.read_csv(config.config.FINISHED_TRADES_CSV)
             total_trades = len(finished_trades)
-            win_rate = len(finished_trades[finished_trades['Profit/Loss'].astype(float) > 0]) / total_trades * 100 if total_trades > 0 else 0
-            total_pl = finished_trades['Profit/Loss'].astype(float).sum()
-            with open(config.config.PORTFOLIO_FILE, 'r') as f:
+            win_rate = (
+                len(finished_trades[finished_trades["Profit/Loss"].astype(float) > 0])
+                / total_trades
+                * 100
+                if total_trades > 0
+                else 0
+            )
+            total_pl = finished_trades["Profit/Loss"].astype(float).sum()
+            with open(config.config.PORTFOLIO_FILE, "r") as f:
                 portfolio = json.load(f)
-            total_value = portfolio.get('cash', 0) + sum(
-                asset['quantity'] * asset['current_price'] for asset in portfolio.get('assets', {}).values()
+            total_value = portfolio.get("cash", 0) + sum(
+                asset["quantity"] * asset["current_price"]
+                for asset in portfolio.get("assets", {}).values()
             )
             message = (
                 "<b>Daily Performance Report</b>\n"

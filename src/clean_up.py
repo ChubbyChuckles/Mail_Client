@@ -1,8 +1,10 @@
-import os
 import glob
+import os
 from pathlib import Path
 from typing import List
-from .config import (logger)
+
+from .config import logger
+
 
 def delete_old_files(directories: List[str], keep_count: int = 5) -> None:
     """
@@ -56,6 +58,7 @@ def delete_old_files(directories: List[str], keep_count: int = 5) -> None:
 
         except Exception as e:
             logger.error(f"Error processing directory {directory}: {str(e)}")
+
 
 def garbage_collection():
     # Define the list of directories to process

@@ -1,32 +1,38 @@
 # trading_bot/src/portfolio.py
+import asyncio
 import glob
 import json
 import os
+import shutil
+import tempfile
 import time
-import requests
 from datetime import datetime, timedelta
+
 import numpy as np
 import pandas as pd
-import tempfile
-import shutil
-from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+import requests
+from tenacity import (retry, retry_if_exception_type, stop_after_attempt,
+                      wait_exponential)
+
 from . import config
+from .bitvavo_order_metrics import (calculate_order_book_metrics,
+                                    fetch_order_book_with_retry)
 from .config import logger
 from .exchange import fetch_ticker_price, fetch_trade_details
-from .state import low_volatility_assets, negative_momentum_counts, portfolio, portfolio_lock
-from .utils import append_to_buy_trades_csv, append_to_finished_trades_csv, append_to_order_book_metrics_csv, calculate_dynamic_ema_period, calculate_ema, calculate_rsi
-from .bitvavo_order_metrics import calculate_order_book_metrics, fetch_order_book_with_retry
-
+from .state import (low_volatility_assets, negative_momentum_counts, portfolio,
+                    portfolio_lock)
 from .telegram_notifications import TelegramNotifier
-import asyncio
+from .utils import (append_to_buy_trades_csv, append_to_finished_trades_csv,
+                    append_to_order_book_metrics_csv,
+                    calculate_dynamic_ema_period, calculate_ema, calculate_rsi)
 
 portfolio_values = []  # At the top of portfolio.py
 
 telegram_notifier = TelegramNotifier(
-    bot_token=config.config.TELEGRAM_BOT_TOKEN,
-    chat_id=config.config.TELEGRAM_CHAT_ID
+    bot_token=config.config.TELEGRAM_BOT_TOKEN, chat_id=config.config.TELEGRAM_CHAT_ID
 )
 asyncio.run_coroutine_threadsafe(telegram_notifier.start(), asyncio.get_event_loop())
+
 
 @retry(
     stop=stop_after_attempt(3),
@@ -35,7 +41,7 @@ asyncio.run_coroutine_threadsafe(telegram_notifier.start(), asyncio.get_event_lo
     before_sleep=lambda retry_state: logger.info(
         f"Retrying fetch_ticker_price after {retry_state.attempt_number} attempts"
     ),
-    reraise=True
+    reraise=True,
 )
 def fetch_ticker_price_with_retry(symbol):
     """Fetches ticker price with retry logic."""
@@ -44,6 +50,7 @@ def fetch_ticker_price_with_retry(symbol):
         raise ValueError(f"Failed to fetch price for {symbol}")
     return float(price)
 
+
 @retry(
     stop=stop_after_attempt(3),
     wait=wait_exponential(multiplier=1, min=4, max=60),
@@ -51,14 +58,17 @@ def fetch_ticker_price_with_retry(symbol):
     before_sleep=lambda retry_state: logger.info(
         f"Retrying fetch_trade_details after {retry_state.attempt_number} attempts"
     ),
-    reraise=True
+    reraise=True,
 )
 def fetch_trade_details_with_retry(symbol, start_time, end_time):
     """Fetches trade details with retry logic."""
-    trade_count, largest_trade_volume_eur = fetch_trade_details(symbol, start_time, end_time)
+    trade_count, largest_trade_volume_eur = fetch_trade_details(
+        symbol, start_time, end_time
+    )
     if trade_count is None or largest_trade_volume_eur is None:
         raise ValueError(f"Failed to fetch trade details for {symbol}")
     return trade_count, largest_trade_volume_eur
+
 
 def calculate_bollinger_bands(close_prices, period=20, std_dev=2):
     """
@@ -83,6 +93,7 @@ def calculate_bollinger_bands(close_prices, period=20, std_dev=2):
     except Exception as e:
         logger.error(f"Error calculating Bollinger Bands: {e}", exc_info=True)
         return None, None, None
+
 
 def sell_asset(
     symbol,
@@ -119,7 +130,9 @@ def sell_asset(
         # Input validation
         if not isinstance(symbol, str) or not symbol:
             raise ValueError(f"Invalid symbol: {symbol}")
-        if not isinstance(asset, dict) or not all(key in asset for key in ["quantity", "purchase_price", "purchase_time"]):
+        if not isinstance(asset, dict) or not all(
+            key in asset for key in ["quantity", "purchase_price", "purchase_time"]
+        ):
             raise ValueError(f"Invalid asset data for {symbol}")
         if not isinstance(current_price, (int, float)) or current_price <= 0:
             raise ValueError(f"Invalid sell price {current_price} for {symbol}")
@@ -128,12 +141,17 @@ def sell_asset(
 
         if not portfolio_lock.acquire(timeout=5):
             logger.error(f"Timeout acquiring portfolio lock for {symbol}")
-            send_alert("Portfolio Lock Failure", f"Timeout acquiring portfolio lock for {symbol}")
+            send_alert(
+                "Portfolio Lock Failure",
+                f"Timeout acquiring portfolio lock for {symbol}",
+            )
             return None
 
         try:
             logger.debug(f"Starting sell process for {symbol}: {reason}")
-            sale_value = asset["quantity"] * current_price * (1 - abs(sell_slippage))  # Use absolute value for calculation
+            sale_value = (
+                asset["quantity"] * current_price * (1 - abs(sell_slippage))
+            )  # Use absolute value for calculation
             sell_fee = sale_value * config.config.SELL_FEE
             net_sale_value = sale_value - sell_fee
             buy_value = asset["quantity"] * asset["purchase_price"]
@@ -172,21 +190,33 @@ def sell_asset(
             if price_monitor_manager:
                 price_monitor_manager.stop(symbol)
             else:
-                logger.warning(f"Price monitor manager is None for {symbol}. Cannot stop monitoring.")
+                logger.warning(
+                    f"Price monitor manager is None for {symbol}. Cannot stop monitoring."
+                )
             append_to_finished_trades_csv(finished_trade)
             telegram_notifier.notify_sell_trade(finished_trade)
         except Exception as e:
-            logger.error(f"Failed to process post-sale actions for {symbol}: {e}", exc_info=True)
-            send_alert("Post-Sale Action Failure", f"Failed to process post-sale actions for {symbol}: {e}")
+            logger.error(
+                f"Failed to process post-sale actions for {symbol}: {e}", exc_info=True
+            )
+            send_alert(
+                "Post-Sale Action Failure",
+                f"Failed to process post-sale actions for {symbol}: {e}",
+            )
         return finished_trade
     except ValueError as e:
         logger.error(f"Validation error in sell_asset for {symbol}: {e}", exc_info=True)
-        send_alert("Sell Asset Failure", f"Validation error in sell_asset for {symbol}: {e}")
+        send_alert(
+            "Sell Asset Failure", f"Validation error in sell_asset for {symbol}: {e}"
+        )
         return None
     except Exception as e:
         logger.error(f"Unexpected error in sell_asset for {symbol}: {e}", exc_info=True)
-        send_alert("Sell Asset Failure", f"Unexpected error in sell_asset for {symbol}: {e}")
+        send_alert(
+            "Sell Asset Failure", f"Unexpected error in sell_asset for {symbol}: {e}"
+        )
         return None
+
 
 def sell_most_profitable_asset(
     portfolio,
@@ -216,7 +246,10 @@ def sell_most_profitable_asset(
     try:
         if not isinstance(portfolio, dict) or "assets" not in portfolio:
             raise ValueError("Invalid portfolio structure")
-        if not isinstance(percent_changes, pd.DataFrame) or "symbol" not in percent_changes.columns:
+        if (
+            not isinstance(percent_changes, pd.DataFrame)
+            or "symbol" not in percent_changes.columns
+        ):
             raise ValueError("Invalid percent_changes DataFrame")
         if not isinstance(finished_trades, list):
             raise ValueError("finished_trades must be a list")
@@ -244,27 +277,44 @@ def sell_most_profitable_asset(
             max_profit = -float("inf")
             asset_to_sell = None
             for symbol, asset in profitable_assets:
-                current_price_series = percent_changes[percent_changes["symbol"] == symbol]["close_price"]
+                current_price_series = percent_changes[
+                    percent_changes["symbol"] == symbol
+                ]["close_price"]
                 current_price = None
                 if current_price_series.empty:
-                    logger.warning(f"No price in percent_changes for {symbol}. Fetching ticker price.")
+                    logger.warning(
+                        f"No price in percent_changes for {symbol}. Fetching ticker price."
+                    )
                     try:
                         current_price = fetch_ticker_price_with_retry(symbol)
                     except Exception as e:
-                        logger.error(f"Failed to fetch price for {symbol}: {e}", exc_info=True)
+                        logger.error(
+                            f"Failed to fetch price for {symbol}: {e}", exc_info=True
+                        )
                         continue
                 else:
                     current_price = float(current_price_series.iloc[0])
                 unrealized_profit = (
                     (current_price - asset["purchase_price"]) / asset["purchase_price"]
-                    if asset["purchase_price"] > 0 else 0
+                    if asset["purchase_price"] > 0
+                    else 0
                 )
-                sell_slippage = sell_slippages.get(symbol, config.config.MAX_SLIPPAGE_SELL + 0.1) if sell_slippages else (config.config.MAX_SLIPPAGE_SELL + 0.1)
-                if unrealized_profit >= 0.01 and unrealized_profit > max_profit and abs(sell_slippage) <= config.config.MAX_SLIPPAGE_SELL:
+                sell_slippage = (
+                    sell_slippages.get(symbol, config.config.MAX_SLIPPAGE_SELL + 0.1)
+                    if sell_slippages
+                    else (config.config.MAX_SLIPPAGE_SELL + 0.1)
+                )
+                if (
+                    unrealized_profit >= 0.01
+                    and unrealized_profit > max_profit
+                    and abs(sell_slippage) <= config.config.MAX_SLIPPAGE_SELL
+                ):
                     max_profit = unrealized_profit
                     asset_to_sell = (symbol, asset, current_price, sell_slippage)
             if asset_to_sell is None:
-                logger.info("No assets with unrealized profit >= 1% or acceptable slippage to sell.")
+                logger.info(
+                    "No assets with unrealized profit >= 1% or acceptable slippage to sell."
+                )
                 return None
 
             symbol, asset, current_price, sell_slippage = asset_to_sell
@@ -282,13 +332,18 @@ def sell_most_profitable_asset(
         finally:
             portfolio_lock.release()
     except ValueError as e:
-        logger.error(f"Validation error in sell_most_profitable_asset: {e}", exc_info=True)
+        logger.error(
+            f"Validation error in sell_most_profitable_asset: {e}", exc_info=True
+        )
         send_alert("Sell Profitable Asset Failure", f"Validation error: {e}")
         return None
     except Exception as e:
-        logger.error(f"Unexpected error in sell_most_profitable_asset: {e}", exc_info=True)
+        logger.error(
+            f"Unexpected error in sell_most_profitable_asset: {e}", exc_info=True
+        )
         send_alert("Sell Profitable Asset Failure", f"Unexpected error: {e}")
         return None
+
 
 def save_portfolio():
     """
@@ -299,7 +354,11 @@ def save_portfolio():
         OSError: For file operation errors.
     """
     try:
-        if not isinstance(portfolio, dict) or "cash" not in portfolio or "assets" not in portfolio:
+        if (
+            not isinstance(portfolio, dict)
+            or "cash" not in portfolio
+            or "assets" not in portfolio
+        ):
             raise ValueError("Invalid portfolio structure")
 
         if not portfolio_lock.acquire(timeout=5):
@@ -322,8 +381,10 @@ def save_portfolio():
             if not file_path or not os.path.basename(file_path):
                 raise ValueError(f"Invalid PORTFOLIO_FILE path: {file_path}")
 
-            os.makedirs(os.path.dirname(file_path) or '.', exist_ok=True)
-            with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.json') as temp_file:
+            os.makedirs(os.path.dirname(file_path) or ".", exist_ok=True)
+            with tempfile.NamedTemporaryFile(
+                mode="w", delete=False, suffix=".json"
+            ) as temp_file:
                 json.dump(portfolio_copy, temp_file, indent=4)
                 temp_file.flush()
                 os.fsync(temp_file.fileno())
@@ -331,8 +392,12 @@ def save_portfolio():
             # logger.info(f"Saved portfolio to {file_path}")
 
             # Save to backup file
-            backup_file = f"{file_path}.backup_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}"
-            with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.json') as temp_file:
+            backup_file = (
+                f"{file_path}.backup_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}"
+            )
+            with tempfile.NamedTemporaryFile(
+                mode="w", delete=False, suffix=".json"
+            ) as temp_file:
                 json.dump(portfolio_copy, temp_file, indent=4)
                 temp_file.flush()
                 os.fsync(temp_file.fileno())
@@ -347,18 +412,30 @@ def save_portfolio():
                     os.remove(old_file)
                     logger.debug(f"Deleted old backup file: {old_file}")
                 except OSError as e:
-                    logger.warning(f"Error deleting old backup file {old_file}: {e}", exc_info=True)
+                    logger.warning(
+                        f"Error deleting old backup file {old_file}: {e}", exc_info=True
+                    )
         finally:
             portfolio_lock.release()
     except ValueError as e:
-        logger.error(f"Validation error saving portfolio to {config.config.PORTFOLIO_FILE}: {e}", exc_info=True)
+        logger.error(
+            f"Validation error saving portfolio to {config.config.PORTFOLIO_FILE}: {e}",
+            exc_info=True,
+        )
         send_alert("Portfolio Save Failure", f"Validation error: {e}")
     except OSError as e:
-        logger.error(f"File operation error saving portfolio to {config.config.PORTFOLIO_FILE}: {e}", exc_info=True)
+        logger.error(
+            f"File operation error saving portfolio to {config.config.PORTFOLIO_FILE}: {e}",
+            exc_info=True,
+        )
         send_alert("Portfolio Save Failure", f"File operation error: {e}")
     except Exception as e:
-        logger.error(f"Unexpected error saving portfolio to {config.config.PORTFOLIO_FILE}: {e}", exc_info=True)
+        logger.error(
+            f"Unexpected error saving portfolio to {config.config.PORTFOLIO_FILE}: {e}",
+            exc_info=True,
+        )
         send_alert("Portfolio Save Failure", f"Unexpected error: {e}")
+
 
 def manage_portfolio(
     above_threshold_data,
@@ -386,7 +463,10 @@ def manage_portfolio(
         # Input validation
         if not isinstance(above_threshold_data, list):
             raise ValueError("above_threshold_data must be a list")
-        if not isinstance(percent_changes, pd.DataFrame) or not {"symbol", "close_price"}.issubset(percent_changes.columns):
+        if not isinstance(percent_changes, pd.DataFrame) or not {
+            "symbol",
+            "close_price",
+        }.issubset(percent_changes.columns):
             raise ValueError("Invalid percent_changes DataFrame")
         if not price_monitor_manager:
             raise ValueError("price_monitor_manager cannot be None")
@@ -408,18 +488,39 @@ def manage_portfolio(
         # Calculate sell slippage for all held assets
         sell_slippages = sell_slippages or {}
         for symbol in portfolio.get("assets", {}):
-            if symbol not in sell_slippages:  # Only calculate if not provided (e.g., not backtesting)
+            if (
+                symbol not in sell_slippages
+            ):  # Only calculate if not provided (e.g., not backtesting)
                 try:
-                    amount_quote = portfolio["assets"][symbol]["quantity"] * portfolio["assets"][symbol]["current_price"]
-                    metrics = calculate_order_book_metrics(symbol.replace("/", "-"), amount_quote=amount_quote)
-                    if "error" not in metrics and metrics.get("slippage_sell") is not None:
-                        sell_slippages[symbol] = metrics["slippage_sell"]  # Negative percentage (e.g., -0.1 for -0.1%)
+                    amount_quote = (
+                        portfolio["assets"][symbol]["quantity"]
+                        * portfolio["assets"][symbol]["current_price"]
+                    )
+                    metrics = calculate_order_book_metrics(
+                        symbol.replace("/", "-"), amount_quote=amount_quote
+                    )
+                    if (
+                        "error" not in metrics
+                        and metrics.get("slippage_sell") is not None
+                    ):
+                        sell_slippages[symbol] = metrics[
+                            "slippage_sell"
+                        ]  # Negative percentage (e.g., -0.1 for -0.1%)
                     else:
-                        logger.warning(f"Could not calculate sell slippage for {symbol}. Using default value.")
-                        sell_slippages[symbol] = -(config.config.MAX_SLIPPAGE_SELL + 0.1)  # Negative to prevent selling
+                        logger.warning(
+                            f"Could not calculate sell slippage for {symbol}. Using default value."
+                        )
+                        sell_slippages[symbol] = -(
+                            config.config.MAX_SLIPPAGE_SELL + 0.1
+                        )  # Negative to prevent selling
                 except Exception as e:
-                    logger.error(f"Error calculating sell slippage for {symbol}: {e}", exc_info=True)
-                    sell_slippages[symbol] = -(config.config.MAX_SLIPPAGE_SELL + 0.1)  # Negative to prevent selling
+                    logger.error(
+                        f"Error calculating sell slippage for {symbol}: {e}",
+                        exc_info=True,
+                    )
+                    sell_slippages[symbol] = -(
+                        config.config.MAX_SLIPPAGE_SELL + 0.1
+                    )  # Negative to prevent selling
 
         if not portfolio_lock.acquire(timeout=5):
             logger.error("Timeout acquiring portfolio lock")
@@ -428,29 +529,42 @@ def manage_portfolio(
 
         try:
             logger.debug("Acquired portfolio_lock for portfolio management")
-            active_monitors = set(price_monitor_manager.running.keys()) if price_monitor_manager.running else set()
+            active_monitors = (
+                set(price_monitor_manager.running.keys())
+                if price_monitor_manager.running
+                else set()
+            )
             active_assets = set(portfolio.get("assets", {}).keys())
             orphaned_monitors = active_monitors - active_assets
             for symbol in orphaned_monitors:
-                logger.warning(f"Stopping orphaned monitor for {symbol} not in portfolio.")
+                logger.warning(
+                    f"Stopping orphaned monitor for {symbol} not in portfolio."
+                )
                 price_monitor_manager.stop(symbol)
 
             # Adjust profit targets if portfolio is near threshold
             if (
                 len(portfolio.get("assets", {})) >= config.config.ASSET_THRESHOLD
                 and above_threshold_data
-                and portfolio.get("cash", 0) >= config.config.PORTFOLIO_VALUE * config.config.ALLOCATION_PER_TRADE
+                and portfolio.get("cash", 0)
+                >= config.config.PORTFOLIO_VALUE * config.config.ALLOCATION_PER_TRADE
             ):
                 profitable_assets = [
-                    symbol for symbol, asset in portfolio.get("assets", {}).items()
-                    if asset.get("current_price", 0) > asset.get("purchase_price", 0) * 1.01
+                    symbol
+                    for symbol, asset in portfolio.get("assets", {}).items()
+                    if asset.get("current_price", 0)
+                    > asset.get("purchase_price", 0) * 1.01
                     and isinstance(asset.get("purchase_time"), datetime)
-                    and (datetime.utcnow() - asset["purchase_time"]).total_seconds() / 60 >= config.config.MIN_HOLDING_MINUTES
+                    and (datetime.utcnow() - asset["purchase_time"]).total_seconds()
+                    / 60
+                    >= config.config.MIN_HOLDING_MINUTES
                 ]
                 if profitable_assets:
                     for symbol in profitable_assets:
                         portfolio["assets"][symbol]["profit_target"] = min(
-                            portfolio["assets"][symbol].get("profit_target", config.config.PROFIT_TARGET),
+                            portfolio["assets"][symbol].get(
+                                "profit_target", config.config.PROFIT_TARGET
+                            ),
                             config.config.ADJUSTED_PROFIT_TARGET,
                         )
                         logger.info(
@@ -477,20 +591,26 @@ def manage_portfolio(
                     price_monitor_manager.start(
                         symbol, portfolio, portfolio_lock, percent_changes
                     )
-                
-                current_price_series = percent_changes[percent_changes["symbol"] == symbol]["close_price"]
+
+                current_price_series = percent_changes[
+                    percent_changes["symbol"] == symbol
+                ]["close_price"]
                 current_price = None
                 if current_price_series.empty:
-                    logger.warning(f"No price in percent_changes for {symbol}. Fetching ticker price.")
+                    logger.warning(
+                        f"No price in percent_changes for {symbol}. Fetching ticker price."
+                    )
                     try:
                         current_price = fetch_ticker_price_with_retry(symbol)
                     except Exception as e:
-                        logger.error(f"Failed to fetch price for {symbol}: {e}", exc_info=True)
+                        logger.error(
+                            f"Failed to fetch price for {symbol}: {e}", exc_info=True
+                        )
                         skipped_assets.append(symbol)
                         continue
                 else:
                     current_price = float(current_price_series.iloc[0])
-                
+
                 asset["current_price"] = current_price
                 price_monitor_manager.last_prices[symbol] = current_price
                 purchase_price = asset.get("purchase_price", 0)
@@ -502,17 +622,21 @@ def manage_portfolio(
                     total_asset_value += asset_value
                     skipped_assets.append(symbol)
                     continue
-                
+
                 asset_value = asset["quantity"] * current_price
                 total_asset_value += asset_value
-                highest_price = max(asset.get("highest_price", purchase_price), current_price)
+                highest_price = max(
+                    asset.get("highest_price", purchase_price), current_price
+                )
                 asset["highest_price"] = highest_price
                 holding_minutes = (
                     (current_time - asset["purchase_time"]).total_seconds() / 60
                     if isinstance(asset.get("purchase_time"), datetime)
                     else 0
                 )
-                symbol_candles = percent_changes[percent_changes["symbol"] == symbol].tail(5)
+                symbol_candles = percent_changes[
+                    percent_changes["symbol"] == symbol
+                ].tail(5)
                 atr = (
                     np.mean(symbol_candles["high"] - symbol_candles["low"])
                     if len(symbol_candles) >= 5
@@ -526,7 +650,8 @@ def manage_portfolio(
                         if holding_minutes < 15
                         else config.config.TRAILING_STOP_FACTOR
                     )
-                    * atr / purchase_price
+                    * atr
+                    / purchase_price
                     if atr > 0 and purchase_price > 0
                     else 0.05
                 )
@@ -539,7 +664,9 @@ def manage_portfolio(
                     len(portfolio.get("assets", {})) >= config.config.ASSET_THRESHOLD
                     and current_price > purchase_price * 1.01
                 ):
-                    profit_target = min(profit_target, config.config.ADJUSTED_PROFIT_TARGET)
+                    profit_target = min(
+                        profit_target, config.config.ADJUSTED_PROFIT_TARGET
+                    )
                 asset["profit_target"] = profit_target
                 ema_period = calculate_dynamic_ema_period(
                     holding_minutes,
@@ -553,16 +680,22 @@ def manage_portfolio(
                     else current_price
                 )
                 momentum = (
-                    percent_changes[percent_changes["symbol"] == symbol]["percent_change"].iloc[0]
+                    percent_changes[percent_changes["symbol"] == symbol][
+                        "percent_change"
+                    ].iloc[0]
                     if not percent_changes[percent_changes["symbol"] == symbol].empty
                     and "percent_change" in percent_changes.columns
                     else 0
                 )
                 if momentum < config.config.MOMENTUM_THRESHOLD:
-                    negative_momentum_counts[symbol] = negative_momentum_counts.get(symbol, 0) + 1
+                    negative_momentum_counts[symbol] = (
+                        negative_momentum_counts.get(symbol, 0) + 1
+                    )
                 else:
                     negative_momentum_counts[symbol] = 0
-                buy_fee = asset.get("buy_fee", 0)  # Get buy fee, default to 0 if not present
+                buy_fee = asset.get(
+                    "buy_fee", 0
+                )  # Get buy fee, default to 0 if not present
                 total_cost = purchase_price * asset["quantity"] + buy_fee
                 unrealized_profit = (
                     ((current_price * asset["quantity"]) - total_cost) / total_cost
@@ -581,7 +714,9 @@ def manage_portfolio(
                     trailing_stop_price = highest_price * (1 - trailing_stop)
                     if trailing_stop_price > purchase_price:
                         sell_prices.append(trailing_stop_price)
-                asset["sell_price"] = min(sell_prices) if sell_prices else profit_target_price
+                asset["sell_price"] = (
+                    min(sell_prices) if sell_prices else profit_target_price
+                )
                 catastrophic_loss = (
                     unrealized_profit <= config.config.CAT_LOSS_THRESHOLD
                     and abs(unrealized_profit) > 2 * atr / purchase_price
@@ -589,10 +724,12 @@ def manage_portfolio(
                     else False
                 )
                 time_stop = (
-                    holding_minutes >= config.config.TIME_STOP_MINUTES and unrealized_profit < 0
+                    holding_minutes >= config.config.TIME_STOP_MINUTES
+                    and unrealized_profit < 0
                 )
                 multiplied_profit_target = (
-                    unrealized_profit >= config.config.PROFIT_TARGET_MULTIPLIER * profit_target
+                    unrealized_profit
+                    >= config.config.PROFIT_TARGET_MULTIPLIER * profit_target
                 )
                 regular_sell_signal = (
                     holding_minutes >= config.config.MIN_HOLDING_MINUTES
@@ -603,21 +740,37 @@ def manage_portfolio(
                         >= config.config.MOMENTUM_CONFIRM_MINUTES
                     )
                 )
-                sell_slippage = sell_slippages.get(symbol, config.config.MAX_SLIPPAGE_SELL + 0.1)
+                sell_slippage = sell_slippages.get(
+                    symbol, config.config.MAX_SLIPPAGE_SELL + 0.1
+                )
                 slippage_ok = abs(sell_slippage) <= abs(config.config.MAX_SLIPPAGE_SELL)
                 sell_signal = (
-                    (multiplied_profit_target or regular_sell_signal or catastrophic_loss or time_stop)
-                    and slippage_ok
-                )
+                    multiplied_profit_target
+                    or regular_sell_signal
+                    or catastrophic_loss
+                    or time_stop
+                ) and slippage_ok
                 if sell_signal:
                     reason = (
-                        "Catastrophic loss" if catastrophic_loss else
-                        "Time stop" if time_stop else
-                        f"Multiplied profit target ({config.config.PROFIT_TARGET_MULTIPLIER}x = {(config.config.PROFIT_TARGET_MULTIPLIER * profit_target)*100:.1f}%)"
-                        if multiplied_profit_target else
-                        "Trailing stop" if trailing_loss >= trailing_stop else
-                        f"Dynamic profit target ({profit_target*100:.1f}%)" if unrealized_profit >= profit_target else
-                        "Negative momentum"
+                        "Catastrophic loss"
+                        if catastrophic_loss
+                        else (
+                            "Time stop"
+                            if time_stop
+                            else (
+                                f"Multiplied profit target ({config.config.PROFIT_TARGET_MULTIPLIER}x = {(config.config.PROFIT_TARGET_MULTIPLIER * profit_target)*100:.1f}%)"
+                                if multiplied_profit_target
+                                else (
+                                    "Trailing stop"
+                                    if trailing_loss >= trailing_stop
+                                    else (
+                                        f"Dynamic profit target ({profit_target*100:.1f}%)"
+                                        if unrealized_profit >= profit_target
+                                        else "Negative momentum"
+                                    )
+                                )
+                            )
+                        )
                     )
                     logger.info(
                         f"Evaluation Decision for {symbol}: Selling due to {reason}. "
@@ -659,7 +812,11 @@ def manage_portfolio(
 
             # Buy new assets and update order book metrics
             for record in above_threshold_data:
-                if not isinstance(record, dict) or "symbol" not in record or "close_price" not in record:
+                if (
+                    not isinstance(record, dict)
+                    or "symbol" not in record
+                    or "close_price" not in record
+                ):
                     logger.warning(f"Invalid record in above_threshold_data: {record}")
                     continue
                 symbol = record["symbol"]
@@ -672,99 +829,166 @@ def manage_portfolio(
                         slippage_buy = metrics.get("slippage_buy", float("inf"))
                         metrics_found = True
                 if not metrics_found:
-                    logger.warning(f"No matching metrics found for {symbol} in order_book_metrics_list")
+                    logger.warning(
+                        f"No matching metrics found for {symbol} in order_book_metrics_list"
+                    )
                     continue
-                
+
                 # Calculate RSI if enabled
                 rsi = None
                 if config.config.USE_RSI:
                     if combined_df is None:
-                        logger.warning(f"Cannot calculate RSI for {symbol}: combined_df is None. Skipping RSI check.")
+                        logger.warning(
+                            f"Cannot calculate RSI for {symbol}: combined_df is None. Skipping RSI check."
+                        )
                     else:
-                        symbol_candles = combined_df[combined_df["symbol"] == symbol]["close"].tail(config.config.RSI_PERIOD)
-                        logger.debug(f"{len(symbol_candles)} candles for RSI calculation for {symbol}.")
+                        symbol_candles = combined_df[combined_df["symbol"] == symbol][
+                            "close"
+                        ].tail(config.config.RSI_PERIOD)
+                        logger.debug(
+                            f"{len(symbol_candles)} candles for RSI calculation for {symbol}."
+                        )
                         if len(symbol_candles) >= config.config.RSI_PERIOD:
-                            rsi = calculate_rsi(symbol_candles.values, config.config.RSI_PERIOD)
+                            rsi = calculate_rsi(
+                                symbol_candles.values, config.config.RSI_PERIOD
+                            )
                             if rsi is None:
-                                logger.warning(f"Failed to calculate RSI for {symbol}. Skipping RSI check.")
+                                logger.warning(
+                                    f"Failed to calculate RSI for {symbol}. Skipping RSI check."
+                                )
                             elif rsi >= config.config.RSI_OVERBOUGHT:
-                                logger.info(f"Cannot buy {symbol}: RSI {rsi:.2f} is overbought (>= {config.config.RSI_OVERBOUGHT}).")
+                                logger.info(
+                                    f"Cannot buy {symbol}: RSI {rsi:.2f} is overbought (>= {config.config.RSI_OVERBOUGHT})."
+                                )
                                 continue
                             elif rsi < config.config.RSI_MIN_SCORE:
-                                logger.info(f"Cannot buy {symbol}: RSI {rsi:.2f} is below minimum threshold ({config.config.RSI_MIN_SCORE}).")
+                                logger.info(
+                                    f"Cannot buy {symbol}: RSI {rsi:.2f} is below minimum threshold ({config.config.RSI_MIN_SCORE})."
+                                )
                                 continue
                         else:
-                            logger.warning(f"Insufficient data for RSI calculation for {symbol} ({len(symbol_candles)} candles). Skipping RSI check.")
-                
+                            logger.warning(
+                                f"Insufficient data for RSI calculation for {symbol} ({len(symbol_candles)} candles). Skipping RSI check."
+                            )
+
                 # Calculate Bollinger Bands if enabled
                 bollinger_ok = True
                 if config.config.USE_BOLLINGER_BANDS:
                     if combined_df is None:
-                        logger.warning(f"Cannot calculate Bollinger Bands for {symbol}: combined_df is None. Skipping Bollinger Bands check.")
+                        logger.warning(
+                            f"Cannot calculate Bollinger Bands for {symbol}: combined_df is None. Skipping Bollinger Bands check."
+                        )
                         bollinger_ok = False
                     else:
-                        symbol_candles = combined_df[combined_df["symbol"] == symbol]["close"].tail(config.config.BOLLINGER_PERIOD)
-                        logger.debug(f"{len(symbol_candles)} candles for Bollinger Bands calculation for {symbol}.")
+                        symbol_candles = combined_df[combined_df["symbol"] == symbol][
+                            "close"
+                        ].tail(config.config.BOLLINGER_PERIOD)
+                        logger.debug(
+                            f"{len(symbol_candles)} candles for Bollinger Bands calculation for {symbol}."
+                        )
                         if len(symbol_candles) >= config.config.BOLLINGER_PERIOD:
-                            middle_band, upper_band, lower_band = calculate_bollinger_bands(
-                                symbol_candles.values,
-                                period=config.config.BOLLINGER_PERIOD,
-                                std_dev=config.config.BOLLINGER_STD_DEV
+                            middle_band, upper_band, lower_band = (
+                                calculate_bollinger_bands(
+                                    symbol_candles.values,
+                                    period=config.config.BOLLINGER_PERIOD,
+                                    std_dev=config.config.BOLLINGER_STD_DEV,
+                                )
                             )
-                            if middle_band is None or upper_band is None or lower_band is None:
-                                logger.warning(f"Failed to calculate Bollinger Bands for {symbol}. Skipping Bollinger Bands check.")
+                            if (
+                                middle_band is None
+                                or upper_band is None
+                                or lower_band is None
+                            ):
+                                logger.warning(
+                                    f"Failed to calculate Bollinger Bands for {symbol}. Skipping Bollinger Bands check."
+                                )
                                 bollinger_ok = False
                             else:
                                 close_price = record["close_price"]
                                 if close_price >= upper_band:
-                                    logger.info(f"Cannot buy {symbol}: Price {close_price:.8f} is above upper Bollinger Band {upper_band:.8f}.")
+                                    logger.info(
+                                        f"Cannot buy {symbol}: Price {close_price:.8f} is above upper Bollinger Band {upper_band:.8f}."
+                                    )
                                     continue
                                 elif close_price <= lower_band:
-                                    logger.info(f"Cannot buy {symbol}: Price {close_price:.8f} is below lower Bollinger Band {lower_band:.8f}.")
+                                    logger.info(
+                                        f"Cannot buy {symbol}: Price {close_price:.8f} is below lower Bollinger Band {lower_band:.8f}."
+                                    )
                                     continue
-                                logger.debug(f"Bollinger Bands for {symbol}: Middle={middle_band:.2f}, Upper={upper_band:.2f}, Lower={lower_band:.2f}, Price={close_price:.2f}")
+                                logger.debug(
+                                    f"Bollinger Bands for {symbol}: Middle={middle_band:.2f}, Upper={upper_band:.2f}, Lower={lower_band:.2f}, Price={close_price:.2f}"
+                                )
                         else:
-                            logger.warning(f"Insufficient data for Bollinger Bands calculation for {symbol} ({len(symbol_candles)} candles). Skipping Bollinger Bands check.")
+                            logger.warning(
+                                f"Insufficient data for Bollinger Bands calculation for {symbol} ({len(symbol_candles)} candles). Skipping Bollinger Bands check."
+                            )
                             bollinger_ok = False
-                
-                logger.debug(f"Evaluating buy for {symbol}: cash={portfolio.get('cash', 0):.2f}, "
-                            f"required_cash={config.config.PORTFOLIO_VALUE * config.config.ALLOCATION_PER_TRADE:.2f}, "
-                            f"assets={len(portfolio.get('assets', {}))}, max_assets={config.config.MAX_ACTIVE_ASSETS}, "
-                            f"low_volatility={symbol in low_volatility_assets}, "
-                            f"total_score={total_score:.2f}, min_score={config.config.MIN_TOTAL_SCORE:.2f}, "
-                            f"slippage_buy={slippage_buy:.3f}%, max_slippage={config.config.MAX_SLIPPAGE_BUY:.3f}%, "
-                            f"rsi={rsi if rsi is not None else 'N/A'}, "
-                            f"bollinger_ok={bollinger_ok}")
-                
+
+                logger.debug(
+                    f"Evaluating buy for {symbol}: cash={portfolio.get('cash', 0):.2f}, "
+                    f"required_cash={config.config.PORTFOLIO_VALUE * config.config.ALLOCATION_PER_TRADE:.2f}, "
+                    f"assets={len(portfolio.get('assets', {}))}, max_assets={config.config.MAX_ACTIVE_ASSETS}, "
+                    f"low_volatility={symbol in low_volatility_assets}, "
+                    f"total_score={total_score:.2f}, min_score={config.config.MIN_TOTAL_SCORE:.2f}, "
+                    f"slippage_buy={slippage_buy:.3f}%, max_slippage={config.config.MAX_SLIPPAGE_BUY:.3f}%, "
+                    f"rsi={rsi if rsi is not None else 'N/A'}, "
+                    f"bollinger_ok={bollinger_ok}"
+                )
+
                 if (
                     symbol not in portfolio.get("assets", {})
-                    and portfolio.get("cash", 0) >= config.config.PORTFOLIO_VALUE * config.config.ALLOCATION_PER_TRADE
-                    and len(portfolio.get("assets", {})) < config.config.MAX_ACTIVE_ASSETS
+                    and portfolio.get("cash", 0)
+                    >= config.config.PORTFOLIO_VALUE
+                    * config.config.ALLOCATION_PER_TRADE
+                    and len(portfolio.get("assets", {}))
+                    < config.config.MAX_ACTIVE_ASSETS
                     and symbol not in low_volatility_assets
                     and total_score >= config.config.MIN_TOTAL_SCORE
                     and slippage_buy <= config.config.MAX_SLIPPAGE_BUY
-                    and (not config.config.USE_RSI or (rsi is not None and config.config.RSI_MIN_SCORE <= rsi < config.config.RSI_OVERBOUGHT))
+                    and (
+                        not config.config.USE_RSI
+                        or (
+                            rsi is not None
+                            and config.config.RSI_MIN_SCORE
+                            <= rsi
+                            < config.config.RSI_OVERBOUGHT
+                        )
+                    )
                     and (not config.config.USE_BOLLINGER_BANDS or bollinger_ok)
                 ):
                     close_price = record["close_price"]
                     purchase_price = close_price * (1 + slippage_buy / 100)
-                    allocation = config.config.PORTFOLIO_VALUE * config.config.ALLOCATION_PER_TRADE
+                    allocation = (
+                        config.config.PORTFOLIO_VALUE
+                        * config.config.ALLOCATION_PER_TRADE
+                    )
                     buy_fee = allocation * config.config.BUY_FEE
                     net_allocation = allocation - buy_fee
-                    quantity = net_allocation / purchase_price if purchase_price > 0 else 0
-                    logger.debug(f"Buy calc for {symbol}: close_price={close_price:.4f}, purchase_price={purchase_price:.4f}, "
-                                f"allocation={allocation:.2f}, buy_fee={buy_fee:.2f}, net_allocation={net_allocation:.2f}, "
-                                f"quantity={quantity:.4f}")
+                    quantity = (
+                        net_allocation / purchase_price if purchase_price > 0 else 0
+                    )
+                    logger.debug(
+                        f"Buy calc for {symbol}: close_price={close_price:.4f}, purchase_price={purchase_price:.4f}, "
+                        f"allocation={allocation:.2f}, buy_fee={buy_fee:.2f}, net_allocation={net_allocation:.2f}, "
+                        f"quantity={quantity:.4f}"
+                    )
                     if quantity <= 0:
-                        logger.warning(f"Cannot buy {symbol}: Invalid quantity {quantity}")
+                        logger.warning(
+                            f"Cannot buy {symbol}: Invalid quantity {quantity}"
+                        )
                         continue
                     actual_cost = quantity * purchase_price
                     try:
-                        trade_count, largest_trade_volume_eur = fetch_trade_details_with_retry(
-                            symbol, five_min_ago, current_time
+                        trade_count, largest_trade_volume_eur = (
+                            fetch_trade_details_with_retry(
+                                symbol, five_min_ago, current_time
+                            )
                         )
                     except Exception as e:
-                        logger.error(f"Failed to fetch trade details for {symbol}: {e}", exc_info=True)
+                        logger.error(
+                            f"Failed to fetch trade details for {symbol}: {e}",
+                            exc_info=True,
+                        )
                         continue
                     buy_trade_data = {
                         "Symbol": symbol,
@@ -791,15 +1015,18 @@ def manage_portfolio(
                         "current_price": close_price,
                         "profit_target": config.config.PROFIT_TARGET,
                         "original_profit_target": config.config.PROFIT_TARGET,
-                        "sell_price": purchase_price * (1 + config.config.PROFIT_TARGET),
+                        "sell_price": purchase_price
+                        * (1 + config.config.PROFIT_TARGET),
                     }
                     portfolio["cash"] -= allocation
-                    total_asset_value += (quantity * close_price)
+                    total_asset_value += quantity * close_price
                     logger.info(
                         f"Bought {quantity:.4f} {symbol} at {purchase_price:.4f} EUR (close {close_price:.4f}) "
                         f"for {actual_cost:.2f} EUR (after {slippage_buy:.2f}% slippage and {buy_fee:.2f} fee), "
                         f"Trade Count: {trade_count}, Largest Trade Volume DEPARTED: €{largest_trade_volume_eur:.2f}, "
-                        f"RSI: {rsi:.2f}" if rsi is not None else f"Bought {quantity:.4f} {symbol} at {purchase_price:.4f} EUR (close {close_price:.4f}) "
+                        f"RSI: {rsi:.2f}"
+                        if rsi is not None
+                        else f"Bought {quantity:.4f} {symbol} at {purchase_price:.4f} EUR (close {close_price:.4f}) "
                         f"for {actual_cost:.2f} EUR (after {slippage_buy:.2f}% slippage and {buy_fee:.2f} fee), "
                         f"Trade Count: {trade_count}, Largest Trade Volume: €{largest_trade_volume_eur:.2f}"
                     )
@@ -809,7 +1036,9 @@ def manage_portfolio(
                     price_monitor_manager.start(
                         symbol, portfolio, portfolio_lock, percent_changes
                     )
-                elif len(portfolio.get("assets", {})) >= config.config.MAX_ACTIVE_ASSETS:
+                elif (
+                    len(portfolio.get("assets", {})) >= config.config.MAX_ACTIVE_ASSETS
+                ):
                     logger.warning(
                         f"Cannot buy {symbol}: Maximum active assets ({config.config.MAX_ACTIVE_ASSETS}) reached."
                     )
@@ -831,7 +1060,14 @@ def manage_portfolio(
                     logger.info(
                         f"Cannot buy {symbol}: Total Score {total_score:.2f} is below threshold ({config.config.MIN_TOTAL_SCORE:.2f}."
                     )
-                elif config.config.USE_RSI and rsi is not None and (rsi < config.config.RSI_MIN_SCORE or rsi >= config.config.RSI_OVERBOUGHT):
+                elif (
+                    config.config.USE_RSI
+                    and rsi is not None
+                    and (
+                        rsi < config.config.RSI_MIN_SCORE
+                        or rsi >= config.config.RSI_OVERBOUGHT
+                    )
+                ):
                     logger.info(
                         f"Cannot buy {symbol}: RSI {rsi:.2f} is outside acceptable range "
                         f"({config.config.RSI_MIN_SCORE} <= RSI < {config.config.RSI_OVERBOUGHT})."
@@ -845,15 +1081,17 @@ def manage_portfolio(
                 elif symbol in low_volatility_assets:
                     logger.debug(f"Cannot buy {symbol}: Marked as low volatility.")
                 else:
-                    logger.info(f"Cannot buy {symbol}: Conditions not met - "
-                            f"in_portfolio={symbol in portfolio.get('assets', {})}, "
-                            f"sufficient_cash={portfolio.get('cash', 0) >= config.config.PORTFOLIO_VALUE * config.config.ALLOCATION_PER_TRADE}, "
-                            f"asset_limit={len(portfolio.get('assets', {})) < config.config.MAX_ACTIVE_ASSETS}, "
-                            f"low_volatility={symbol in low_volatility_assets}, "
-                            f"total_score={total_score:.2f} >= {config.config.MIN_TOTAL_SCORE}, "
-                            f"slippage_buy={slippage_buy:.3f}% <= {config.config.MAX_SLIPPAGE_BUY}%, "
-                            f"rsi={rsi if rsi is not None else 'N/A'}, "
-                            f"bollinger_ok={bollinger_ok}")
+                    logger.info(
+                        f"Cannot buy {symbol}: Conditions not met - "
+                        f"in_portfolio={symbol in portfolio.get('assets', {})}, "
+                        f"sufficient_cash={portfolio.get('cash', 0) >= config.config.PORTFOLIO_VALUE * config.config.ALLOCATION_PER_TRADE}, "
+                        f"asset_limit={len(portfolio.get('assets', {})) < config.config.MAX_ACTIVE_ASSETS}, "
+                        f"low_volatility={symbol in low_volatility_assets}, "
+                        f"total_score={total_score:.2f} >= {config.config.MIN_TOTAL_SCORE}, "
+                        f"slippage_buy={slippage_buy:.3f}% <= {config.config.MAX_SLIPPAGE_BUY}%, "
+                        f"rsi={rsi if rsi is not None else 'N/A'}, "
+                        f"bollinger_ok={bollinger_ok}"
+                    )
         finally:
             portfolio_lock.release()
     except ValueError as e:
@@ -871,10 +1109,17 @@ def manage_portfolio(
             append_to_order_book_metrics_csv(order_book_metrics_list)
     except Exception as e:
         logger.error(f"Error saving order book metrics: {e}", exc_info=True)
-        send_alert("Order Book Metrics Save Failure", f"Error saving order book metrics: {e}")
+        send_alert(
+            "Order Book Metrics Save Failure", f"Error saving order book metrics: {e}"
+        )
 
     total_portfolio_value = portfolio.get("cash", 0) + total_asset_value
-    portfolio_values.append({"timestamp": datetime.utcnow().isoformat(), "portfolio_value": total_portfolio_value})
+    portfolio_values.append(
+        {
+            "timestamp": datetime.utcnow().isoformat(),
+            "portfolio_value": total_portfolio_value,
+        }
+    )
     if skipped_assets:
         logger.warning(
             f"Portfolio value may be inaccurate due to missing prices for: {', '.join(skipped_assets)}"
@@ -883,39 +1128,52 @@ def manage_portfolio(
     #     f"Portfolio: Cash: {portfolio.get('cash', 0):.2f} EUR, Assets: {len(portfolio.get('assets', {}))}, Total Value: {total_portfolio_value:.2f} EUR"
     # )
     # Add these notification calls here
-    if not hasattr(telegram_notifier, 'last_summary_time') or \
-    (datetime.utcnow() - telegram_notifier.last_summary_time).total_seconds() >= 3600:
+    if (
+        not hasattr(telegram_notifier, "last_summary_time")
+        or (datetime.utcnow() - telegram_notifier.last_summary_time).total_seconds()
+        >= 3600
+    ):
         telegram_notifier.notify_portfolio_summary(portfolio)
         telegram_notifier.last_summary_time = datetime.utcnow()
 
-    if (datetime.utcnow() - getattr(telegram_notifier, 'last_pinned_time', datetime.utcnow())).total_seconds() >= 60:
+    if (
+        datetime.utcnow()
+        - getattr(telegram_notifier, "last_pinned_time", datetime.utcnow())
+    ).total_seconds() >= 60:
         asyncio.run_coroutine_threadsafe(
-            telegram_notifier.update_pinned_summary(portfolio),
-            asyncio.get_event_loop()
+            telegram_notifier.update_pinned_summary(portfolio), asyncio.get_event_loop()
         )
         telegram_notifier.last_pinned_time = datetime.utcnow()
 
-    if (datetime.utcnow() - getattr(telegram_notifier, 'last_chart_time', datetime.utcnow())).total_seconds() >= 86400:
+    if (
+        datetime.utcnow()
+        - getattr(telegram_notifier, "last_chart_time", datetime.utcnow())
+    ).total_seconds() >= 86400:
         asyncio.run_coroutine_threadsafe(
             telegram_notifier.notify_performance_chart(portfolio_values),
-            asyncio.get_event_loop()
+            asyncio.get_event_loop(),
         )
         telegram_notifier.last_chart_time = datetime.utcnow()
 
-    if (datetime.utcnow() - getattr(telegram_notifier, 'last_allocation_time', datetime.utcnow())).total_seconds() >= 86400:
+    if (
+        datetime.utcnow()
+        - getattr(telegram_notifier, "last_allocation_time", datetime.utcnow())
+    ).total_seconds() >= 86400:
         asyncio.run_coroutine_threadsafe(
             telegram_notifier.notify_asset_allocation(portfolio),
-            asyncio.get_event_loop()
+            asyncio.get_event_loop(),
         )
         telegram_notifier.last_allocation_time = datetime.utcnow()
 
-    if datetime.utcnow().hour == 0 and (not hasattr(telegram_notifier, 'last_report_date') or \
-    datetime.utcnow().date() != telegram_notifier.last_report_date):
+    if datetime.utcnow().hour == 0 and (
+        not hasattr(telegram_notifier, "last_report_date")
+        or datetime.utcnow().date() != telegram_notifier.last_report_date
+    ):
         asyncio.run_coroutine_threadsafe(
-            telegram_notifier.notify_daily_report(),
-            asyncio.get_event_loop()
+            telegram_notifier.notify_daily_report(), asyncio.get_event_loop()
         )
         telegram_notifier.last_report_date = datetime.utcnow().date()
+
 
 def send_alert(subject, message):
     """

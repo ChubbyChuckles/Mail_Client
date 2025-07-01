@@ -1,9 +1,10 @@
 # config.py
+import io
 import logging
 import os
 import sys
-import io
 from datetime import datetime
+
 from dotenv import load_dotenv
 
 # Set session start time for log file naming
@@ -28,12 +29,14 @@ logger.setLevel(logging.INFO)
 logger.addHandler(console_handler)
 logger.addHandler(file_handler)
 
+
 class EvaluationLogHandler(logging.Handler):
     def emit(self, record):
         if record.levelno == logging.INFO and "Evaluation Decision" in record.msg:
             with open(log_filename, "a", encoding="utf-8") as f:
                 formatted_message = self.format(record)
                 f.write(f"{formatted_message}\n")
+
 
 evaluation_handler = EvaluationLogHandler()
 evaluation_handler.setFormatter(log_formatter)
@@ -44,8 +47,9 @@ try:
     if sys.stdout.fileno():
         sys.stdout = os.fdopen(sys.stdout.fileno(), "w", buffering=1)
 except (AttributeError, OSError, io.UnsupportedOperation):
-    if hasattr(sys.stdout, 'reconfigure'):
+    if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(line_buffering=True)
+
 
 class Config:
     _instance = None
@@ -66,7 +70,9 @@ class Config:
         try:
             return float(value.split("#")[0].strip())
         except ValueError as e:
-            logger.error(f"Invalid value for {var_name}: {value}. Using default: {default}")
+            logger.error(
+                f"Invalid value for {var_name}: {value}. Using default: {default}"
+            )
             return float(default)
 
     def reload(self):
@@ -80,15 +86,21 @@ class Config:
         self.CANDLE_LIMIT = int(os.getenv("CANDLE_LIMIT", 10))
         self.CANDLE_TIMEFRAME = os.getenv("CANDLE_TIMEFRAME", "1m")
         self.RESULTS_FOLDER = os.getenv("RESULTS_FOLDER", "data_1m_pq_alot")
-        self.PARQUET_FILENAME = os.getenv("PARQUET_FILENAME", "bitvavo_1min_candles_eur.parquet")
-        self.PRICE_INCREASE_THRESHOLD = float(os.getenv("PRICE_INCREASE_THRESHOLD", 1.0))
+        self.PARQUET_FILENAME = os.getenv(
+            "PARQUET_FILENAME", "bitvavo_1min_candles_eur.parquet"
+        )
+        self.PRICE_INCREASE_THRESHOLD = float(
+            os.getenv("PRICE_INCREASE_THRESHOLD", 1.0)
+        )
         self.MIN_VOLUME_EUR = float(os.getenv("MIN_VOLUME_EUR", 10000))
         self.PORTFOLIO_VALUE = float(os.getenv("PORTFOLIO_VALUE", 10000))
         self.ALLOCATION_PER_TRADE = float(os.getenv("ALLOCATION_PER_TRADE", 0.1))
         self.BUY_FEE = float(os.getenv("BUY_FEE", 0.0015))
         self.SELL_FEE = float(os.getenv("SELL_FEE", 0.0025))
         self.TRAILING_STOP_FACTOR = float(os.getenv("TRAILING_STOP_FACTOR", 1.0))
-        self.TRAILING_STOP_FACTOR_EARLY = float(os.getenv("TRAILING_STOP_FACTOR_EARLY", 1.5))
+        self.TRAILING_STOP_FACTOR_EARLY = float(
+            os.getenv("TRAILING_STOP_FACTOR_EARLY", 1.5)
+        )
         self.ADJUSTED_PROFIT_TARGET = float(os.getenv("ADJUSTED_PROFIT_TARGET", 0.015))
         self.PROFIT_TARGET = float(os.getenv("PROFIT_TARGET", 0.05))
         self.MIN_HOLDING_MINUTES = float(os.getenv("MIN_HOLDING_MINUTES", 5))
@@ -101,10 +113,16 @@ class Config:
         self.MAX_ACTIVE_ASSETS = int(os.getenv("MAX_ACTIVE_ASSETS", 7))
         self.ASSET_THRESHOLD = int(self.MAX_ACTIVE_ASSETS * 0.6)
         self.INACTIVITY_TIMEOUT = int(os.getenv("INACTIVITY_TIMEOUT", 20))
-        self.PROFIT_TARGET_MULTIPLIER = float(os.getenv("PROFIT_TARGET_MULTIPLIER", 2.0))
+        self.PROFIT_TARGET_MULTIPLIER = float(
+            os.getenv("PROFIT_TARGET_MULTIPLIER", 2.0)
+        )
         self.BUY_TRADES_CSV = os.getenv("BUY_TRADES_CSV", "buy_trades.csv")
-        self.FINISHED_TRADES_CSV = os.getenv("FINISHED_TRADES_CSV", "finished_trades.csv")
-        self.ORDER_BOOK_METRICS_CSV = os.getenv("ORDER_BOOK_METRICS_CSV", "order_book_metrics.csv")
+        self.FINISHED_TRADES_CSV = os.getenv(
+            "FINISHED_TRADES_CSV", "finished_trades.csv"
+        )
+        self.ORDER_BOOK_METRICS_CSV = os.getenv(
+            "ORDER_BOOK_METRICS_CSV", "order_book_metrics.csv"
+        )
         self.AMOUNT_QUOTE = self.parse_float_env("AMOUNT_QUOTE", 5.5)
         self.PRICE_RANGE_PERCENT = self.parse_float_env("PRICE_RANGE_PERCENT", 10.0)
         self.MAX_SLIPPAGE_BUY = self.parse_float_env("MAX_SLIPPAGE_BUY", 0.05)
@@ -114,9 +132,15 @@ class Config:
         self.RSI_PERIOD = int(os.getenv("RSI_PERIOD", 14))
         self.RSI_OVERBOUGHT = int(os.getenv("RSI_OVERBOUGHT", 70))
         self.RSI_MIN_SCORE = int(os.getenv("RSI_MIN_SCORE", 30))
-        self.USE_BOLLINGER_BANDS = bool(os.getenv("USE_BOLLINGER_BANDS", True))  # Enable/disable Bollinger Bands for buy decisions
-        self.BOLLINGER_PERIOD = int(os.getenv("BOLLINGER_PERIOD", 20))  # Period for Bollinger Bands calculation
-        self.BOLLINGER_STD_DEV = self.parse_float_env("BOLLINGER_STD_DEV", 2.0)  # Standard deviation multiplier for Bollinger Bands    
+        self.USE_BOLLINGER_BANDS = bool(
+            os.getenv("USE_BOLLINGER_BANDS", True)
+        )  # Enable/disable Bollinger Bands for buy decisions
+        self.BOLLINGER_PERIOD = int(
+            os.getenv("BOLLINGER_PERIOD", 20)
+        )  # Period for Bollinger Bands calculation
+        self.BOLLINGER_STD_DEV = self.parse_float_env(
+            "BOLLINGER_STD_DEV", 2.0
+        )  # Standard deviation multiplier for Bollinger Bands
 
         if self.MAX_ACTIVE_ASSETS < 1:
             logger.warning(
@@ -132,8 +156,10 @@ class Config:
 
         # logger.info("Configuration reloaded from .env file")
 
+
 # Instantiate the singleton config object
 config = Config()
+
 
 # Replace reload_config function to use the singleton
 def reload_config():

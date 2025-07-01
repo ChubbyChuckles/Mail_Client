@@ -5,7 +5,7 @@ from datetime import datetime
 from threading import Lock, RLock
 
 from . import config
-from . config import (logger)
+from .config import logger
 
 # Initialize global state
 portfolio = {"cash": config.config.PORTFOLIO_VALUE, "assets": {}}
@@ -40,12 +40,15 @@ def load_portfolio():
         logger.info(f"Loaded portfolio from {config.config.PORTFOLIO_FILE}")
     except Exception as e:
         logger.error(
-            f"Error loading portfolio from {config.config.PORTFOLIO_FILE}: {e}", exc_info=True
+            f"Error loading portfolio from {config.config.PORTFOLIO_FILE}: {e}",
+            exc_info=True,
         )
         # Try loading from latest backup
         import glob
 
-        backup_files = sorted(glob.glob(f"{config.config.PORTFOLIO_FILE}.backup_*"), reverse=True)
+        backup_files = sorted(
+            glob.glob(f"{config.config.PORTFOLIO_FILE}.backup_*"), reverse=True
+        )
         for backup_file in backup_files:
             try:
                 with open(backup_file, "r") as f:

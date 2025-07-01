@@ -1,6 +1,8 @@
 # trading_bot/src/trade_variables.py
 import os
+
 from dotenv import load_dotenv
+
 from . import config
 from .config import logger
 
@@ -9,6 +11,7 @@ GREEN = "\033[32m"
 WHITE = "\033[37m"
 BRIGHT_BLUE = "\033[94m"
 RESET = "\033[0m"  # Resets color to default
+
 
 def reload_trade_variables():
     """
@@ -24,11 +27,16 @@ def reload_trade_variables():
         # Explicitly reload .env file
         env_path = os.path.join(os.path.dirname(__file__), "..", ".env")
         if not os.path.exists(env_path):
-            logger.warning(f".env file not found at {env_path}. Using existing environment variables.")
+            logger.warning(
+                f".env file not found at {env_path}. Using existing environment variables."
+            )
         else:
             if not load_dotenv(env_path):
                 logger.error(f"Failed to load .env file from {env_path}")
-                send_alert("Environment Load Failure", f"Failed to load .env file from {env_path}")
+                send_alert(
+                    "Environment Load Failure",
+                    f"Failed to load .env file from {env_path}",
+                )
                 raise OSError(f"Failed to load .env file from {env_path}")
 
         # Required configuration variables with fallback values
@@ -60,64 +68,142 @@ def reload_trade_variables():
         invalid_vars = []
 
         # Validate and retrieve configuration variables
-        for var_name, (expected_type, default_value, type_desc) in required_vars.items():
+        for var_name, (
+            expected_type,
+            default_value,
+            type_desc,
+        ) in required_vars.items():
             try:
                 value = getattr(config.config, var_name, None)
                 if value is None:
-                    logger.warning(f"Configuration variable {var_name} missing, using default: {default_value}")
+                    logger.warning(
+                        f"Configuration variable {var_name} missing, using default: {default_value}"
+                    )
                     value = default_value
                 else:
                     value = expected_type(value)
-                    if expected_type in (int, float) and type_desc == "non-negative float" and value < 0:
-                        logger.warning(f"Invalid value for {var_name}: {value} (must be non-negative). Using default: {default_value}")
+                    if (
+                        expected_type in (int, float)
+                        and type_desc == "non-negative float"
+                        and value < 0
+                    ):
+                        logger.warning(
+                            f"Invalid value for {var_name}: {value} (must be non-negative). Using default: {default_value}"
+                        )
                         value = default_value
-                    elif expected_type == int and type_desc == "non-negative integer" and (not isinstance(value, int) or value < 0):
-                        logger.warning(f"Invalid value for {var_name}: {value} (must be non-negative integer). Using default: {default_value}")
+                    elif (
+                        expected_type == int
+                        and type_desc == "non-negative integer"
+                        and (not isinstance(value, int) or value < 0)
+                    ):
+                        logger.warning(
+                            f"Invalid value for {var_name}: {value} (must be non-negative integer). Using default: {default_value}"
+                        )
                         value = default_value
-                    elif expected_type == float and type_desc == "negative float" and value > 0:
-                        logger.warning(f"Invalid value for {var_name}: {value} (must be negative). Using default: {default_value}")
+                    elif (
+                        expected_type == float
+                        and type_desc == "negative float"
+                        and value > 0
+                    ):
+                        logger.warning(
+                            f"Invalid value for {var_name}: {value} (must be negative). Using default: {default_value}"
+                        )
                         value = default_value
 
                 # Format the value for display
                 if var_name in ["PORTFOLIO_VALUE", "MIN_VOLUME_EUR"]:
                     formatted_value = f"{value:,.2f}€"
-                elif var_name in ["PRICE_INCREASE_THRESHOLD", "MAX_SLIPPAGE_BUY", "MAX_SLIPPAGE_SELL", "CAT_LOSS_THRESHOLD", "MOMENTUM_THRESHOLD"]:
+                elif var_name in [
+                    "PRICE_INCREASE_THRESHOLD",
+                    "MAX_SLIPPAGE_BUY",
+                    "MAX_SLIPPAGE_SELL",
+                    "CAT_LOSS_THRESHOLD",
+                    "MOMENTUM_THRESHOLD",
+                ]:
                     formatted_value = f"{value:.3f}%"
                 elif var_name in ["ALLOCATION_PER_TRADE"]:
                     formatted_value = f"{value:.3f}"
-                elif var_name in ["MIN_TOTAL_SCORE", "TRAILING_STOP_FACTOR", "TRAILING_STOP_FACTOR_EARLY"]:
+                elif var_name in [
+                    "MIN_TOTAL_SCORE",
+                    "TRAILING_STOP_FACTOR",
+                    "TRAILING_STOP_FACTOR_EARLY",
+                ]:
                     formatted_value = f"{value:.2f}"
-                elif var_name in ["ADJUSTED_PROFIT_TARGET", "PROFIT_TARGET", "BUY_FEE", "SELL_FEE"]:
+                elif var_name in [
+                    "ADJUSTED_PROFIT_TARGET",
+                    "PROFIT_TARGET",
+                    "BUY_FEE",
+                    "SELL_FEE",
+                ]:
                     formatted_value = f"{value:.4f}"
                 else:
                     formatted_value = str(value)
                 trade_variables.append((var_name, formatted_value))
             except (ValueError, TypeError) as e:
-                logger.error(f"Invalid value for {var_name}: {getattr(config.config, var_name, 'N/A')} ({e}). Using default: {default_value}")
+                logger.error(
+                    f"Invalid value for {var_name}: {getattr(config.config, var_name, 'N/A')} ({e}). Using default: {default_value}"
+                )
                 invalid_vars.append(var_name)
                 formatted_value = (
-                    f"{default_value:,.2f}€" if var_name in ["PORTFOLIO_VALUE", "MIN_VOLUME_EUR"] else
-                    f"{default_value:.3f}%" if var_name in ["PRICE_INCREASE_THRESHOLD", "MAX_SLIPPAGE_BUY", "MAX_SLIPPAGE_SELL", "CAT_LOSS_THRESHOLD", "MOMENTUM_THRESHOLD"] else
-                    f"{default_value:.3f}" if var_name == "ALLOCATION_PER_TRADE" else
-                    f"{default_value:.2f}" if var_name in ["MIN_TOTAL_SCORE", "TRAILING_STOP_FACTOR", "TRAILING_STOP_FACTOR_EARLY"] else
-                    f"{default_value:.4f}" if var_name in ["ADJUSTED_PROFIT_TARGET", "PROFIT_TARGET", "BUY_FEE", "SELL_FEE"] else
-                    str(default_value)
+                    f"{default_value:,.2f}€"
+                    if var_name in ["PORTFOLIO_VALUE", "MIN_VOLUME_EUR"]
+                    else (
+                        f"{default_value:.3f}%"
+                        if var_name
+                        in [
+                            "PRICE_INCREASE_THRESHOLD",
+                            "MAX_SLIPPAGE_BUY",
+                            "MAX_SLIPPAGE_SELL",
+                            "CAT_LOSS_THRESHOLD",
+                            "MOMENTUM_THRESHOLD",
+                        ]
+                        else (
+                            f"{default_value:.3f}"
+                            if var_name == "ALLOCATION_PER_TRADE"
+                            else (
+                                f"{default_value:.2f}"
+                                if var_name
+                                in [
+                                    "MIN_TOTAL_SCORE",
+                                    "TRAILING_STOP_FACTOR",
+                                    "TRAILING_STOP_FACTOR_EARLY",
+                                ]
+                                else (
+                                    f"{default_value:.4f}"
+                                    if var_name
+                                    in [
+                                        "ADJUSTED_PROFIT_TARGET",
+                                        "PROFIT_TARGET",
+                                        "BUY_FEE",
+                                        "SELL_FEE",
+                                    ]
+                                    else str(default_value)
+                                )
+                            )
+                        )
+                    )
                 )
                 trade_variables.append((var_name, formatted_value))
 
         if invalid_vars:
-            send_alert("Trade Variables Validation Warning", f"Invalid values for: {', '.join(invalid_vars)}. Used defaults.")
+            send_alert(
+                "Trade Variables Validation Warning",
+                f"Invalid values for: {', '.join(invalid_vars)}. Used defaults.",
+            )
 
         logger.debug(f"Successfully reloaded {len(trade_variables)} trade variables")
         return trade_variables
     except OSError as e:
-        logger.error(f"File operation error in reload_trade_variables: {e}", exc_info=True)
+        logger.error(
+            f"File operation error in reload_trade_variables: {e}", exc_info=True
+        )
         send_alert("Trade Variables Reload Failure", f"File operation error: {e}")
         return []
     except Exception as e:
         logger.error(f"Unexpected error in reload_trade_variables: {e}", exc_info=True)
         send_alert("Trade Variables Reload Failure", f"Unexpected error: {e}")
         return []
+
 
 def print_trade_variables(vars_per_line=3, total_line_width=120):
     """
@@ -136,9 +222,13 @@ def print_trade_variables(vars_per_line=3, total_line_width=120):
     try:
         # Input validation
         if not isinstance(vars_per_line, int) or vars_per_line <= 0:
-            raise ValueError(f"Invalid vars_per_line: {vars_per_line} (must be a positive integer)")
+            raise ValueError(
+                f"Invalid vars_per_line: {vars_per_line} (must be a positive integer)"
+            )
         if not isinstance(total_line_width, int) or total_line_width <= 0:
-            raise ValueError(f"Invalid total_line_width: {total_line_width} (must be a positive integer)")
+            raise ValueError(
+                f"Invalid total_line_width: {total_line_width} (must be a positive integer)"
+            )
 
         # Reload trade variables
         trade_variables = reload_trade_variables()
@@ -149,11 +239,15 @@ def print_trade_variables(vars_per_line=3, total_line_width=120):
         # Print headline, centered within total_line_width
         headline = "TRADE STRATEGY VARIABLES"
         logger.info(f"{BRIGHT_BLUE}{headline.center(total_line_width)}{RESET}")
-        logger.info('')
+        logger.info("")
 
         # Determine the maximum width needed for variable names and values
-        max_name_width = max(len(name) for name, _ in trade_variables) + 4  # Add padding
-        max_value_width = max(len(value) for _, value in trade_variables) + 4  # Add padding
+        max_name_width = (
+            max(len(name) for name, _ in trade_variables) + 4
+        )  # Add padding
+        max_value_width = (
+            max(len(value) for _, value in trade_variables) + 4
+        )  # Add padding
         col_width = max(max_name_width, max_value_width)
 
         # Calculate the width allocated to each column based on vars_per_line
@@ -170,26 +264,39 @@ def print_trade_variables(vars_per_line=3, total_line_width=120):
 
         # Process variables in chunks based on vars_per_line
         for i in range(0, len(trade_variables), vars_per_line):
-            chunk = trade_variables[i:i + vars_per_line]
+            chunk = trade_variables[i : i + vars_per_line]
             name_line = ""
             value_line = ""
             for name, value in chunk:
                 # Truncate name/value if they exceed allocated_col_width to prevent overflow
-                name_display = (name[:allocated_col_width-4] + "..." if len(name) > allocated_col_width-4 else name)
-                value_display = (value[:allocated_col_width-4] + "..." if len(value) > allocated_col_width-4 else value)
+                name_display = (
+                    name[: allocated_col_width - 4] + "..."
+                    if len(name) > allocated_col_width - 4
+                    else name
+                )
+                value_display = (
+                    value[: allocated_col_width - 4] + "..."
+                    if len(value) > allocated_col_width - 4
+                    else value
+                )
                 name_line += f"{GREEN}{name_display.center(allocated_col_width)}{RESET}"
-                value_line += f"{WHITE}{value_display.center(allocated_col_width)}{RESET}"
+                value_line += (
+                    f"{WHITE}{value_display.center(allocated_col_width)}{RESET}"
+                )
             logger.info(name_line)
             logger.info(value_line)
-            logger.info('')
+            logger.info("")
 
-        logger.debug(f"Printed {len(trade_variables)} trade variables with {vars_per_line} per line")
+        logger.debug(
+            f"Printed {len(trade_variables)} trade variables with {vars_per_line} per line"
+        )
     except ValueError as e:
         logger.error(f"Validation error in print_trade_variables: {e}", exc_info=True)
         send_alert("Print Trade Variables Failure", f"Validation error: {e}")
     except Exception as e:
         logger.error(f"Unexpected error in print_trade_variables: {e}", exc_info=True)
         send_alert("Print Trade Variables Failure", f"Unexpected error: {e}")
+
 
 def send_alert(subject, message):
     """

@@ -8,7 +8,7 @@ import pandas as pd
 from ccxt.base.errors import PermissionDenied
 
 from . import config
-from . config import (logger)
+from .config import logger
 from .exchange import (bitvavo, check_rate_limit, handle_ban_error, semaphore,
                        wait_until_ban_lifted)
 from .portfolio import sell_asset
@@ -131,7 +131,10 @@ class PriceMonitorManager:
                             for c in candles
                             if (current_time - c["timestamp"]).total_seconds() <= 5
                         ]
-                        if time.time() - self.last_update[symbol] > config.config.INACTIVITY_TIMEOUT:
+                        if (
+                            time.time() - self.last_update[symbol]
+                            > config.config.INACTIVITY_TIMEOUT
+                        ):
                             logger.info(
                                 f"{symbol} inactive for {config.config.INACTIVITY_TIMEOUT} seconds. Marking as low volatility."
                             )
@@ -276,14 +279,22 @@ class PriceMonitorManager:
                 if atr > 0
                 else False
             )
-            time_stop = holding_minutes >= config.config.TIME_STOP_MINUTES and unrealized_profit < 0
-            multiplied_profit_target = (
-                unrealized_profit >= config.config.PROFIT_TARGET_MULTIPLIER * profit_target
+            time_stop = (
+                holding_minutes >= config.config.TIME_STOP_MINUTES
+                and unrealized_profit < 0
             )
-            regular_sell_signal = holding_minutes >= config.config.MIN_HOLDING_MINUTES and (
-                trailing_loss >= trailing_stop
-                or unrealized_profit >= profit_target
-                or negative_momentum_counts.get(symbol, 0) >= config.config.MOMENTUM_CONFIRM_MINUTES
+            multiplied_profit_target = (
+                unrealized_profit
+                >= config.config.PROFIT_TARGET_MULTIPLIER * profit_target
+            )
+            regular_sell_signal = (
+                holding_minutes >= config.config.MIN_HOLDING_MINUTES
+                and (
+                    trailing_loss >= trailing_stop
+                    or unrealized_profit >= profit_target
+                    or negative_momentum_counts.get(symbol, 0)
+                    >= config.config.MOMENTUM_CONFIRM_MINUTES
+                )
             )
             sell_signal = (
                 multiplied_profit_target

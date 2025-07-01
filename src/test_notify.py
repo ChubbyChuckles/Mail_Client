@@ -1,12 +1,13 @@
 # test_notify.py
 import asyncio
-from .telegram_notifications import TelegramNotifier
+
 from .config import config  # Adjust import based on your config file
+from .telegram_notifications import TelegramNotifier
+
 
 async def test_notifier():
     notifier = TelegramNotifier(
-        bot_token=config.TELEGRAM_BOT_TOKEN,
-        chat_id=config.TELEGRAM_CHAT_ID
+        bot_token=config.TELEGRAM_BOT_TOKEN, chat_id=config.TELEGRAM_CHAT_ID
     )
     try:
         # Start the notifier's polling in a background task
@@ -28,6 +29,7 @@ async def test_notifier():
         except asyncio.CancelledError:
             pass
 
+
 def run_test():
     # Use a new event loop for the test
     loop = asyncio.new_event_loop()
@@ -40,6 +42,7 @@ def run_test():
             task.cancel()
         loop.run_until_complete(loop.shutdown_asyncgens())
         loop.close()
+
 
 if __name__ == "__main__":
     run_test()

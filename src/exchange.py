@@ -11,7 +11,7 @@ from ccxt.base.errors import PermissionDenied
 from tenacity import retry, stop_after_attempt, wait_fixed
 
 from . import config
-from . config import (logger)
+from .config import logger
 from .state import (ban_expiry_time, is_banned, last_reset_time,
                     rate_limit_lock, weight_used)
 
@@ -183,7 +183,9 @@ def fetch_ticker_price(symbol):
 
 
 @retry(stop=stop_after_attempt(3), wait=wait_fixed(5))
-def fetch_klines(symbol, timeframe=config.config.CANDLE_TIMEFRAME, limit=config.config.CANDLE_LIMIT):
+def fetch_klines(
+    symbol, timeframe=config.config.CANDLE_TIMEFRAME, limit=config.config.CANDLE_LIMIT
+):
     """
     Fetches OHLCV data for a given symbol from Bitvavo.
 

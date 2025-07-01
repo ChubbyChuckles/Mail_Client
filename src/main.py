@@ -1,39 +1,43 @@
 # main.py
+import os
 import sys
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FutureTimeoutError
 from datetime import datetime, timedelta
-import os
+
 import ccxt
 import pandas as pd
-from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+from tenacity import (retry, retry_if_exception_type, stop_after_attempt,
+                      wait_exponential)
 
 from . import config
+from .clean_up import garbage_collection
 from .config import logger
-from .data_processor import verify_and_analyze_data, colorize_value
+from .data_processor import colorize_value, verify_and_analyze_data
 from .exchange import bitvavo, check_rate_limit, fetch_klines
 from .portfolio import manage_portfolio, save_portfolio
 from .price_monitor import PriceMonitorManager
-from .state import ban_expiry_time, is_banned, low_volatility_assets, portfolio, portfolio_lock
-from .storage import save_to_local
 from .print_assets import print_portfolio
-from .clean_up import garbage_collection
 from .print_trade_variables import print_trade_variables
+from .state import (ban_expiry_time, is_banned, low_volatility_assets,
+                    portfolio, portfolio_lock)
+from .storage import save_to_local
 
 last_cycle_time = time.time()
 GREEN = "\033[32m"
 RESET = "\033[0m"
 
-from .telegram_notifications import TelegramNotifier
 import asyncio
 
+from .telegram_notifications import TelegramNotifier
+
 telegram_notifier = TelegramNotifier(
-    bot_token=config.config.TELEGRAM_BOT_TOKEN,
-    chat_id=config.config.TELEGRAM_CHAT_ID
+    bot_token=config.config.TELEGRAM_BOT_TOKEN, chat_id=config.config.TELEGRAM_CHAT_ID
 )
 asyncio.run_coroutine_threadsafe(telegram_notifier.start(), asyncio.get_event_loop())
+
 
 def watchdog(price_monitor_manager):
     global last_cycle_time
@@ -49,7 +53,9 @@ def watchdog(price_monitor_manager):
                     try:
                         price_monitor_manager.stop_all()
                     except Exception as e:
-                        logger.error(f"Error stopping monitors in watchdog: {e}", exc_info=True)
+                        logger.error(
+                            f"Error stopping monitors in watchdog: {e}", exc_info=True
+                        )
                     time.sleep(min(ban_expiry_time - current_time, 60))
                 else:
                     logger.error("Main loop hung without ban. Attempting recovery...")
@@ -57,6 +63,7 @@ def watchdog(price_monitor_manager):
         except Exception as e:
             logger.error(f"Watchdog error: {e}", exc_info=True)
             time.sleep(10)
+
 
 def center_text(text, total_width=256):
     try:
@@ -70,6 +77,7 @@ def center_text(text, total_width=256):
         logger.error(f"Error in center_text: {e}", exc_info=True)
         return text
 
+
 @retry(
     stop=stop_after_attempt(3),
     wait=wait_exponential(multiplier=1, min=4, max=60),
@@ -77,10 +85,11 @@ def center_text(text, total_width=256):
     before_sleep=lambda retry_state: logger.info(
         f"Retrying {retry_state.fn.__name__} after {retry_state.attempt_number} attempts"
     ),
-    reraise=True
+    reraise=True,
 )
 def load_markets_with_retry():
     return bitvavo.load_markets()
+
 
 def main():
     price_monitor_manager = PriceMonitorManager()
@@ -101,17 +110,17 @@ def main():
         logger.info(f"{GREEN}{'=' * 256}{RESET}")
         logger.info(center_text(f"{GREEN}CringeTrader 1.0.4{RESET}", total_width=256))
         logger.info(f"{GREEN}{'=' * 256}{RESET}")
-        
+
         try:
             print_trade_variables(vars_per_line=7, total_line_width=256)
         except Exception as e:
             logger.error(f"Error printing trade variables: {e}", exc_info=True)
-        
+
         try:
             garbage_collection()
         except Exception as e:
             logger.error(f"Error in garbage collection: {e}", exc_info=True)
-        
+
         try:
             markets = load_markets_with_retry()
             eur_pairs = [
@@ -168,8 +177,10 @@ def main():
             except Exception as e:
                 logger.error(f"Unexpected error fetching tickers: {e}", exc_info=True)
                 symbols = eur_pairs[:300]
-                send_alert("Ticker Fetch Failure", f"Unexpected error fetching tickers: {e}")
-            
+                send_alert(
+                    "Ticker Fetch Failure", f"Unexpected error fetching tickers: {e}"
+                )
+
             logger.info(f"Processing {GREEN}{len(symbols)}{RESET} EUR symbols")
 
             active_monitors = price_monitor_manager.active_monitors()
@@ -184,9 +195,12 @@ def main():
             all_data = []
             try:
                 with ThreadPoolExecutor(max_workers=adjusted_concurrency) as executor:
-                    logger.debug(f"Starting ThreadPoolExecutor with {adjusted_concurrency} workers")
+                    logger.debug(
+                        f"Starting ThreadPoolExecutor with {adjusted_concurrency} workers"
+                    )
                     futures = {
-                        executor.submit(fetch_klines, symbol): symbol for symbol in symbols
+                        executor.submit(fetch_klines, symbol): symbol
+                        for symbol in symbols
                     }
                     for future in futures:
                         symbol = futures[future]
@@ -198,9 +212,15 @@ def main():
                         except FutureTimeoutError:
                             logger.error(f"Timeout fetching klines for {symbol}")
                         except (ccxt.NetworkError, ccxt.RequestTimeout) as e:
-                            logger.error(f"Network error fetching klines for {symbol}: {e}", exc_info=True)
+                            logger.error(
+                                f"Network error fetching klines for {symbol}: {e}",
+                                exc_info=True,
+                            )
                         except Exception as e:
-                            logger.error(f"Unexpected error fetching klines for {symbol}: {e}", exc_info=True)
+                            logger.error(
+                                f"Unexpected error fetching klines for {symbol}: {e}",
+                                exc_info=True,
+                            )
             except Exception as e:
                 logger.error(f"Error in ThreadPoolExecutor: {e}", exc_info=True)
                 send_alert("Executor Failure", f"ThreadPoolExecutor error: {e}")
@@ -208,9 +228,13 @@ def main():
             if all_data:
                 try:
                     combined_df = pd.concat(all_data, ignore_index=True)
-                    logger.debug(f"Combined DataFrame has {len(combined_df)} rows, with {combined_df['symbol'].nunique()} unique symbols")
-                    for symbol in combined_df['symbol'].unique():
-                        logger.debug(f"Symbol {symbol} has {len(combined_df[combined_df['symbol'] == symbol])} candles")
+                    logger.debug(
+                        f"Combined DataFrame has {len(combined_df)} rows, with {combined_df['symbol'].nunique()} unique symbols"
+                    )
+                    for symbol in combined_df["symbol"].unique():
+                        logger.debug(
+                            f"Symbol {symbol} has {len(combined_df[combined_df['symbol'] == symbol])} candles"
+                        )
                     output_path = (
                         f"{config.config.RESULTS_FOLDER}/"
                         f"{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}_"
@@ -221,7 +245,9 @@ def main():
                     logger.error(f"Error concatenating data: {e}", exc_info=True)
                     continue
                 except Exception as e:
-                    logger.error(f"Unexpected error processing data: {e}", exc_info=True)
+                    logger.error(
+                        f"Unexpected error processing data: {e}", exc_info=True
+                    )
                     continue
 
                 try:
@@ -247,12 +273,16 @@ def main():
                     save_portfolio()
                 except Exception as e:
                     logger.error(f"Error saving portfolio: {e}", exc_info=True)
-                    send_alert("Portfolio Save Failure", f"Failed to save portfolio: {e}")
+                    send_alert(
+                        "Portfolio Save Failure", f"Failed to save portfolio: {e}"
+                    )
 
                 try:
                     if not portfolio_lock.acquire(timeout=5):
                         logger.error("Timeout acquiring portfolio lock")
-                        send_alert("Portfolio Lock Failure", "Failed to acquire portfolio lock")
+                        send_alert(
+                            "Portfolio Lock Failure", "Failed to acquire portfolio lock"
+                        )
                         continue
                     try:
                         total_value = portfolio["cash"] + sum(
@@ -267,23 +297,34 @@ def main():
                     finally:
                         portfolio_lock.release()
                 except Exception as e:
-                    logger.error(f"Error calculating portfolio value: {e}", exc_info=True)
+                    logger.error(
+                        f"Error calculating portfolio value: {e}", exc_info=True
+                    )
 
                 try:
                     if not os.path.exists("portfolio.json"):
-                        raise FileNotFoundError("Portfolio file 'portfolio.json' does not exist")
+                        raise FileNotFoundError(
+                            "Portfolio file 'portfolio.json' does not exist"
+                        )
                     print_portfolio("portfolio.json")
                 except FileNotFoundError as e:
                     logger.error(f"Portfolio file error: {e}", exc_info=True)
                 except Exception as e:
-                    logger.error(f"Unexpected error printing portfolio: {e}", exc_info=True)
+                    logger.error(
+                        f"Unexpected error printing portfolio: {e}", exc_info=True
+                    )
             else:
                 logger.warning("No data collected in this cycle.")
 
             try:
                 if not portfolio_lock.acquire(timeout=5):
-                    logger.error("Timeout acquiring portfolio lock for monitor management")
-                    send_alert("Monitor Lock Failure", "Failed to acquire lock for monitor management")
+                    logger.error(
+                        "Timeout acquiring portfolio lock for monitor management"
+                    )
+                    send_alert(
+                        "Monitor Lock Failure",
+                        "Failed to acquire lock for monitor management",
+                    )
                     continue
                 try:
                     active_assets = set(portfolio["assets"].keys())
@@ -293,7 +334,10 @@ def main():
                             try:
                                 price_monitor_manager.stop(symbol)
                             except Exception as e:
-                                logger.error(f"Error stopping monitor for {symbol}: {e}", exc_info=True)
+                                logger.error(
+                                    f"Error stopping monitor for {symbol}: {e}",
+                                    exc_info=True,
+                                )
                     for symbol in active_assets:
                         if (
                             symbol not in price_monitor_manager.running
@@ -304,7 +348,10 @@ def main():
                                     symbol, portfolio, portfolio_lock, combined_df
                                 )
                             except Exception as e:
-                                logger.error(f"Error starting monitor for {symbol}: {e}", exc_info=True)
+                                logger.error(
+                                    f"Error starting monitor for {symbol}: {e}",
+                                    exc_info=True,
+                                )
                 finally:
                     portfolio_lock.release()
             except Exception as e:
@@ -312,6 +359,7 @@ def main():
 
             try:
                 from .state import save_state
+
                 save_state()
             except Exception as e:
                 logger.error(f"Error saving state: {e}", exc_info=True)
@@ -324,7 +372,7 @@ def main():
                 center_text(
                     f"{GREEN}Cycle completed in {elapsed_time:.2f} seconds. "
                     f"Sleeping for {sleep_time:.2f} seconds.{RESET}",
-                    total_width=256
+                    total_width=256,
                 )
             )
             logger.info(f"{GREEN}{'=' * 256}{RESET}")
@@ -334,19 +382,26 @@ def main():
     except KeyboardInterrupt:
         logger.info("Received shutdown signal. Initiating graceful shutdown...")
         try:
-            asyncio.run_coroutine_threadsafe(telegram_notifier.stop(), asyncio.get_event_loop())
+            asyncio.run_coroutine_threadsafe(
+                telegram_notifier.stop(), asyncio.get_event_loop()
+            )
         except Exception as e:
-            logger.error(f"Error stopping Telegram notifier during shutdown: {e}", exc_info=True)
+            logger.error(
+                f"Error stopping Telegram notifier during shutdown: {e}", exc_info=True
+            )
         try:
             price_monitor_manager.stop_all()
         except Exception as e:
-            logger.error(f"Error stopping price monitors during shutdown: {e}", exc_info=True)
+            logger.error(
+                f"Error stopping price monitors during shutdown: {e}", exc_info=True
+            )
         try:
             save_portfolio()
         except Exception as e:
             logger.error(f"Error saving portfolio during shutdown: {e}", exc_info=True)
         try:
             from .state import save_state
+
             save_state()
         except Exception as e:
             logger.error(f"Error saving state during shutdown: {e}", exc_info=True)
@@ -357,8 +412,10 @@ def main():
         send_alert("Critical Failure", f"Main loop crashed: {e}")
         time.sleep(60)
 
+
 def send_alert(subject, message):
     telegram_notifier.notify_error(subject, message)
+
 
 if __name__ == "__main__":
     main()

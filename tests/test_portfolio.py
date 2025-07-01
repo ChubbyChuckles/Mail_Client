@@ -1,18 +1,16 @@
 import json
 import os
 from datetime import datetime, timedelta
-from unittest.mock import MagicMock, patch
-import pytest
-import pandas as pd
-import numpy as np
 from threading import Lock
+from unittest.mock import MagicMock, patch
 
-from src.portfolio import (
-    sell_asset,
-    sell_most_profitable_asset,
-    save_portfolio,
-    manage_portfolio,
-)
+import numpy as np
+import pandas as pd
+import pytest
+
+from src.portfolio import (manage_portfolio, save_portfolio, sell_asset,
+                           sell_most_profitable_asset)
+
 
 # Mock configuration values
 @pytest.fixture
@@ -41,6 +39,7 @@ def config():
         "logger": MagicMock(),
     }
 
+
 @pytest.fixture
 def portfolio_data():
     return {
@@ -55,54 +54,79 @@ def portfolio_data():
                 "profit_target": 0.03,
                 "sell_price": 30900.0,
             }
-        }
+        },
     }
+
 
 @pytest.fixture
 def portfolio_lock():
     return Lock()
 
+
 @pytest.fixture
 def percent_changes():
-    return pd.DataFrame({
-        "symbol": ["BTC/EUR", "ETH/EUR"],
-        "close_price": [30500.0, 2000.0],
-        "percent_change": [0.01, 0.02],
-        "high": [31000.0, 2050.0],
-        "low": [30000.0, 1950.0],
-        "close": [30500.0, 2000.0]
-    })
+    return pd.DataFrame(
+        {
+            "symbol": ["BTC/EUR", "ETH/EUR"],
+            "close_price": [30500.0, 2000.0],
+            "percent_change": [0.01, 0.02],
+            "high": [31000.0, 2050.0],
+            "low": [30000.0, 1950.0],
+            "close": [30500.0, 2000.0],
+        }
+    )
+
 
 @pytest.fixture
 def price_monitor_manager():
     return MagicMock()
 
+
 @pytest.fixture
 def above_threshold_data():
     return [
         {"symbol": "ETH/EUR", "close_price": 2000.0},
-        {"symbol": "XRP/EUR", "close_price": 0.5}
+        {"symbol": "XRP/EUR", "close_price": 0.5},
     ]
+
 
 @pytest.fixture
 def order_book_metrics_list():
     return [
-        {"market": "ETH-EUR", "total_score": 0.8, "slippage_buy": 0.005, "bought": False},
-        {"market": "XRP-EUR", "total_score": 0.6, "slippage_buy": 0.015, "bought": False}
+        {
+            "market": "ETH-EUR",
+            "total_score": 0.8,
+            "slippage_buy": 0.005,
+            "bought": False,
+        },
+        {
+            "market": "XRP-EUR",
+            "total_score": 0.6,
+            "slippage_buy": 0.015,
+            "bought": False,
+        },
     ]
 
 
-def test_sell_asset_invalid_price(config, portfolio_data, portfolio_lock, price_monitor_manager):
+def test_sell_asset_invalid_price(
+    config, portfolio_data, portfolio_lock, price_monitor_manager
+):
     finished_trades = []
     symbol = "BTC/EUR"
     asset = portfolio_data["assets"][symbol]
     with patch.dict("src.portfolio", portfolio_data, clear=True):
         result = sell_asset(
-            symbol, asset, 0.0, portfolio_data, portfolio_lock, finished_trades, 
-            "Invalid price", price_monitor_manager
+            symbol,
+            asset,
+            0.0,
+            portfolio_data,
+            portfolio_lock,
+            finished_trades,
+            "Invalid price",
+            price_monitor_manager,
         )
     assert result is None
-   
+
 
 def test_sell_asset_none_price_monitor(config, portfolio_data, portfolio_lock):
     finished_trades = []
@@ -111,19 +135,33 @@ def test_sell_asset_none_price_monitor(config, portfolio_data, portfolio_lock):
     current_price = 31000.0
     with patch.dict("src.portfolio", portfolio_data, clear=True):
         result = sell_asset(
-            symbol, asset, current_price, portfolio_data, portfolio_lock, finished_trades, 
-            "Profit target reached", None
+            symbol,
+            asset,
+            current_price,
+            portfolio_data,
+            portfolio_lock,
+            finished_trades,
+            "Profit target reached",
+            None,
         )
     assert result is not None
-    
+
 
 def test_manage_portfolio_low_score(
-    config, portfolio_data, above_threshold_data, percent_changes, price_monitor_manager, order_book_metrics_list
+    config,
+    portfolio_data,
+    above_threshold_data,
+    percent_changes,
+    price_monitor_manager,
+    order_book_metrics_list,
 ):
     order_book_metrics_list[0]["total_score"] = 0.5  # Below MIN_TOTAL_SCORE
     portfolio_data["assets"] = {}
     with patch.dict("src.portfolio", portfolio_data, clear=True):
-        manage_portfolio(above_threshold_data, percent_changes, price_monitor_manager, order_book_metrics_list)
+        manage_portfolio(
+            above_threshold_data,
+            percent_changes,
+            price_monitor_manager,
+            order_book_metrics_list,
+        )
     assert "ETH/EUR" not in portfolio_data["assets"]
-    
-

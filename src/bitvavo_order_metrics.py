@@ -1,9 +1,12 @@
 # trading_bot/src/bitvavo_order_metrics.py
 import logging
 from urllib.parse import urlencode
+
 import requests
 from python_bitvavo_api.bitvavo import Bitvavo
-from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+from tenacity import (retry, retry_if_exception_type, stop_after_attempt,
+                      wait_exponential)
+
 from . import config
 from .config import logger
 from .exchange import check_rate_limit
@@ -22,6 +25,7 @@ bitvavo = Bitvavo(
 # Base URL for direct REST API calls
 BASE_URL = "https://api.bitvavo.com/v2"
 
+
 @retry(
     stop=stop_after_attempt(3),
     wait=wait_exponential(multiplier=1, min=4, max=60),
@@ -29,7 +33,7 @@ BASE_URL = "https://api.bitvavo.com/v2"
     before_sleep=lambda retry_state: logger.info(
         f"Retrying bitvavo.book after {retry_state.attempt_number} attempts"
     ),
-    reraise=True
+    reraise=True,
 )
 def fetch_order_book_with_retry(market, depth=1000):
     """
@@ -49,12 +53,17 @@ def fetch_order_book_with_retry(market, depth=1000):
     try:
         check_rate_limit(1)  # Assume order book fetch has a weight of 1
         order_book = bitvavo.book(market, {"depth": depth})
-        if not isinstance(order_book, dict) or not order_book.get("bids") or not order_book.get("asks"):
+        if (
+            not isinstance(order_book, dict)
+            or not order_book.get("bids")
+            or not order_book.get("asks")
+        ):
             raise ValueError(f"Invalid order book data for {market}")
         return order_book
     except Exception as e:
         logger.error(f"Error fetching order book for {market}: {e}", exc_info=True)
         raise
+
 
 def calculate_order_book_metrics(market, amount_quote=5.5, price_range_percent=10.0):
     """
@@ -78,12 +87,15 @@ def calculate_order_book_metrics(market, amount_quote=5.5, price_range_percent=1
             raise ValueError(f"Invalid market: {market}")
         if not isinstance(amount_quote, (int, float)) or amount_quote <= 0:
             raise ValueError(f"Invalid amount_quote: {amount_quote}")
-        if not isinstance(price_range_percent, (int, float)) or price_range_percent <= 0:
+        if (
+            not isinstance(price_range_percent, (int, float))
+            or price_range_percent <= 0
+        ):
             raise ValueError(f"Invalid price_range_percent: {price_range_percent}")
 
         # Fetch order book
         order_book = fetch_order_book_with_retry(market, depth=1000)
-        
+
         # Initialize metrics
         metrics = {
             "market": order_book.get("market", market),
@@ -127,17 +139,20 @@ def calculate_order_book_metrics(market, amount_quote=5.5, price_range_percent=1
             metrics["mid_price"] = (metrics["best_bid"] + metrics["best_ask"]) / 2
             metrics["spread_percentage"] = (
                 (metrics["spread"] / metrics["mid_price"]) * 100
-                if metrics["mid_price"] else None
+                if metrics["mid_price"]
+                else None
             )
 
         # 3. Depth and Volume within ±price_range_percent
         price_range_low = (
             metrics["mid_price"] * (1 - price_range_percent / 100)
-            if metrics["mid_price"] is not None else None
+            if metrics["mid_price"] is not None
+            else None
         )
         price_range_high = (
             metrics["mid_price"] * (1 + price_range_percent / 100)
-            if metrics["mid_price"] is not None else None
+            if metrics["mid_price"] is not None
+            else None
         )
 
         bid_volume = 0
@@ -156,7 +171,9 @@ def calculate_order_book_metrics(market, amount_quote=5.5, price_range_percent=1
                     bid_value += amount * price
                     bid_weighted_sum += amount * price
             except (IndexError, ValueError, TypeError) as e:
-                logger.warning(f"Invalid bid entry in order book for {market}: {e}", exc_info=True)
+                logger.warning(
+                    f"Invalid bid entry in order book for {market}: {e}", exc_info=True
+                )
                 continue
 
         for ask in asks:
@@ -168,7 +185,9 @@ def calculate_order_book_metrics(market, amount_quote=5.5, price_range_percent=1
                     ask_value += amount * price
                     ask_weighted_sum += amount * price
             except (IndexError, ValueError, TypeError) as e:
-                logger.warning(f"Invalid ask entry in order book for {market}: {e}", exc_info=True)
+                logger.warning(
+                    f"Invalid ask entry in order book for {market}: {e}", exc_info=True
+                )
                 continue
 
         metrics["bid_volume"] = bid_volume
@@ -177,7 +196,11 @@ def calculate_order_book_metrics(market, amount_quote=5.5, price_range_percent=1
         metrics["ask_value"] = ask_value
         metrics["buy_depth"] = bid_value
         metrics["sell_depth"] = ask_value
-        metrics["total_depth"] = bid_value + ask_value if bid_value is not None and ask_value is not None else None
+        metrics["total_depth"] = (
+            bid_value + ask_value
+            if bid_value is not None and ask_value is not None
+            else None
+        )
 
         # 4. Order Book Imbalance
         if bid_volume + ask_volume > 0:
@@ -212,7 +235,10 @@ def calculate_order_book_metrics(market, amount_quote=5.5, price_range_percent=1
                     if total_amount >= base_amount:
                         break
                 except (IndexError, ValueError, TypeError) as e:
-                    logger.warning(f"Invalid {side} level in order book for {market}: {e}", exc_info=True)
+                    logger.warning(
+                        f"Invalid {side} level in order book for {market}: {e}",
+                        exc_info=True,
+                    )
                     continue
 
             if total_amount < base_amount:
@@ -222,7 +248,8 @@ def calculate_order_book_metrics(market, amount_quote=5.5, price_range_percent=1
                 predicted_price = weighted_price_sum / total_amount
                 slippage_percent = (
                     (predicted_price - expected_price) / expected_price * 100
-                    if expected_price else None
+                    if expected_price
+                    else None
                 )
                 metrics[f"slippage_{side}"] = slippage_percent
                 metrics[f"predicted_price_{side}"] = predicted_price
@@ -233,7 +260,9 @@ def calculate_order_book_metrics(market, amount_quote=5.5, price_range_percent=1
             metrics["total_score"] = buy_metrics.get("total_score")
             metrics["recommendation"] = buy_metrics.get("recommendation")
         except Exception as e:
-            logger.error(f"Error analyzing buy decision for {market}: {e}", exc_info=True)
+            logger.error(
+                f"Error analyzing buy decision for {market}: {e}", exc_info=True
+            )
             metrics["total_score"] = None
             metrics["recommendation"] = None
 
@@ -243,13 +272,18 @@ def calculate_order_book_metrics(market, amount_quote=5.5, price_range_percent=1
         logger.error(f"Validation error for {market}: {e}", exc_info=True)
         return {"error": f"Validation error: {e}", "market": market}
     except (requests.RequestException, requests.HTTPError) as e:
-        logger.error(f"Network error fetching order book for {market}: {e}", exc_info=True)
+        logger.error(
+            f"Network error fetching order book for {market}: {e}", exc_info=True
+        )
         send_alert("Order Book Fetch Failure", f"Network error for {market}: {e}")
         return {"error": f"Network error: {e}", "market": market}
     except Exception as e:
-        logger.error(f"Unexpected error processing order book for {market}: {e}", exc_info=True)
+        logger.error(
+            f"Unexpected error processing order book for {market}: {e}", exc_info=True
+        )
         send_alert("Order Book Metrics Failure", f"Unexpected error for {market}: {e}")
         return {"error": f"Unexpected error: {e}", "market": market}
+
 
 def send_alert(subject, message):
     """

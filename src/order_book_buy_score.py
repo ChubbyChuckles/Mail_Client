@@ -8,7 +8,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from . import config
-from . config import (logger)
+from .config import logger
 
 
 def calculate_mid_price(order_book):

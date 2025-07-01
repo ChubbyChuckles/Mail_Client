@@ -8,7 +8,7 @@ import requests
 from python_bitvavo_api.bitvavo import Bitvavo
 
 from . import config
-from .config import (logger)
+from .config import logger
 
 # Configure logging
 logging.basicConfig(

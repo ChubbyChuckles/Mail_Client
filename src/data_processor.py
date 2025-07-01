@@ -1,11 +1,13 @@
 # trading_bot/src/data_processor.py
 from datetime import datetime, timedelta
-import pandas as pd
-import ccxt
-from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
-from .bitvavo_order_metrics import calculate_order_book_metrics
+import ccxt
+import pandas as pd
+from tenacity import (retry, retry_if_exception_type, stop_after_attempt,
+                      wait_exponential)
+
 from . import config
+from .bitvavo_order_metrics import calculate_order_book_metrics
 from .config import logger
 from .exchange import check_rate_limit, semaphore
 from .state import low_volatility_assets, portfolio, portfolio_lock
@@ -16,6 +18,7 @@ RED = "\033[31m"
 YELLOW = "\033[33m"
 BRIGHT_BLUE = "\033[94m"
 RESET = "\033[0m"
+
 
 def colorize_value(value, column):
     try:
@@ -49,8 +52,11 @@ def colorize_value(value, column):
             return f"{YELLOW}{value:<12}{RESET}"
         return value
     except (TypeError, ValueError) as e:
-        logger.error(f"Error formatting value {value} for column {column}: {e}", exc_info=True)
+        logger.error(
+            f"Error formatting value {value} for column {column}: {e}", exc_info=True
+        )
         return str(value)
+
 
 @retry(
     stop=stop_after_attempt(3),
@@ -59,14 +65,15 @@ def colorize_value(value, column):
     before_sleep=lambda retry_state: logger.info(
         f"Retrying {retry_state.fn.__name__} after {retry_state.attempt_number} attempts"
     ),
-    reraise=True
+    reraise=True,
 )
 def calculate_order_book_metrics_with_retry(market, amount_quote, price_range_percent):
     return calculate_order_book_metrics(
         market=market,
         amount_quote=amount_quote,
-        price_range_percent=price_range_percent
+        price_range_percent=price_range_percent,
     )
+
 
 def verify_and_analyze_data(df, price_monitor_manager):
     """
@@ -93,7 +100,9 @@ def verify_and_analyze_data(df, price_monitor_manager):
 
         required_columns = {"timestamp", "open", "close", "volume", "symbol"}
         if not required_columns.issubset(df.columns):
-            raise ValueError(f"DataFrame missing required columns: {required_columns - set(df.columns)}")
+            raise ValueError(
+                f"DataFrame missing required columns: {required_columns - set(df.columns)}"
+            )
 
         current_time = datetime.utcnow()
         ten_min_ago = current_time - timedelta(minutes=10)
@@ -131,7 +140,10 @@ def verify_and_analyze_data(df, price_monitor_manager):
             return [], pd.DataFrame(), []
 
         above_threshold = percent_changes[
-            (percent_changes["percent_change"] >= config.config.PRICE_INCREASE_THRESHOLD)
+            (
+                percent_changes["percent_change"]
+                >= config.config.PRICE_INCREASE_THRESHOLD
+            )
             & (percent_changes["volume_eur"] >= config.config.MIN_VOLUME_EUR)
         ]
 
@@ -143,13 +155,16 @@ def verify_and_analyze_data(df, price_monitor_manager):
             try:
                 if not semaphore.acquire(timeout=5):
                     logger.error(f"Timeout acquiring semaphore for {symbol}")
-                    send_alert("Semaphore Failure", f"Failed to acquire semaphore for {symbol}")
+                    send_alert(
+                        "Semaphore Failure", f"Failed to acquire semaphore for {symbol}"
+                    )
                     continue
                 try:
                     check_rate_limit(1)
                     metrics = calculate_order_book_metrics_with_retry(
                         market=symbol.replace("/", "-"),
-                        amount_quote=portfolio['cash'] * config.config.ALLOCATION_PER_TRADE,
+                        amount_quote=portfolio["cash"]
+                        * config.config.ALLOCATION_PER_TRADE,
                         price_range_percent=config.config.PRICE_RANGE_PERCENT,
                     )
                     metrics["bought"] = False
@@ -157,9 +172,15 @@ def verify_and_analyze_data(df, price_monitor_manager):
                 finally:
                     semaphore.release()
             except (ccxt.NetworkError, ccxt.RequestTimeout) as e:
-                logger.error(f"Network error calculating order book metrics for {symbol}: {e}", exc_info=True)
+                logger.error(
+                    f"Network error calculating order book metrics for {symbol}: {e}",
+                    exc_info=True,
+                )
             except Exception as e:
-                logger.error(f"Unexpected error calculating order book metrics for {symbol}: {e}", exc_info=True)
+                logger.error(
+                    f"Unexpected error calculating order book metrics for {symbol}: {e}",
+                    exc_info=True,
+                )
 
         if not above_threshold.empty:
             logger.info(
@@ -170,7 +191,14 @@ def verify_and_analyze_data(df, price_monitor_manager):
             for _, row in above_threshold.iterrows():
                 try:
                     symbol = row["symbol"]
-                    metrics = next((m for m in order_book_metrics_list if m["market"] == symbol.replace("/", "-")), {})
+                    metrics = next(
+                        (
+                            m
+                            for m in order_book_metrics_list
+                            if m["market"] == symbol.replace("/", "-")
+                        ),
+                        {},
+                    )
                     if not metrics:
                         logger.warning(f"No order book metrics for {symbol}")
                         continue
@@ -187,7 +215,9 @@ def verify_and_analyze_data(df, price_monitor_manager):
                         f"Latest Timestamp: {row['latest_timestamp']}"
                     )
                 except Exception as e:
-                    logger.error(f"Error logging data for {row['symbol']}: {e}", exc_info=True)
+                    logger.error(
+                        f"Error logging data for {row['symbol']}: {e}", exc_info=True
+                    )
 
         else:
             logger.info(
@@ -213,13 +243,17 @@ def verify_and_analyze_data(df, price_monitor_manager):
                     try:
                         if not semaphore.acquire(timeout=5):
                             logger.error(f"Timeout acquiring semaphore for {symbol}")
-                            send_alert("Semaphore Failure", f"Failed to acquire semaphore for {symbol}")
+                            send_alert(
+                                "Semaphore Failure",
+                                f"Failed to acquire semaphore for {symbol}",
+                            )
                             continue
                         try:
                             check_rate_limit(1)
                             metrics = calculate_order_book_metrics_with_retry(
                                 market=symbol.replace("/", "-"),
-                                amount_quote=portfolio['cash'] * config.config.ALLOCATION_PER_TRADE,
+                                amount_quote=portfolio["cash"]
+                                * config.config.ALLOCATION_PER_TRADE,
                                 price_range_percent=config.config.PRICE_RANGE_PERCENT,
                             )
                             metrics["bought"] = False
@@ -239,45 +273,74 @@ def verify_and_analyze_data(df, price_monitor_manager):
                             f"Latest Timestamp: {row['latest_timestamp']}"
                         )
                     except (ccxt.NetworkError, ccxt.RequestTimeout) as e:
-                        logger.error(f"Network error calculating order book metrics for {symbol}: {e}", exc_info=True)
+                        logger.error(
+                            f"Network error calculating order book metrics for {symbol}: {e}",
+                            exc_info=True,
+                        )
                     except Exception as e:
-                        logger.error(f"Unexpected error processing {symbol}: {e}", exc_info=True)
+                        logger.error(
+                            f"Unexpected error processing {symbol}: {e}", exc_info=True
+                        )
             except Exception as e:
-                logger.error(f"Error processing below-threshold coins: {e}", exc_info=True)
+                logger.error(
+                    f"Error processing below-threshold coins: {e}", exc_info=True
+                )
         else:
-            logger.info(f"No coins with price increase < {config.config.PRICE_INCREASE_THRESHOLD}%")
+            logger.info(
+                f"No coins with price increase < {config.config.PRICE_INCREASE_THRESHOLD}%"
+            )
 
         try:
             if not portfolio_lock.acquire(timeout=5):
                 logger.error("Timeout acquiring portfolio lock")
                 send_alert("Portfolio Lock Failure", "Failed to acquire portfolio lock")
-                return above_threshold.to_dict("records"), percent_changes, order_book_metrics_list
+                return (
+                    above_threshold.to_dict("records"),
+                    percent_changes,
+                    order_book_metrics_list,
+                )
             try:
                 for symbol in list(low_volatility_assets):
-                    if symbol in portfolio["assets"] and symbol in percent_changes.index:
+                    if (
+                        symbol in portfolio["assets"]
+                        and symbol in percent_changes.index
+                    ):
                         try:
                             recent_change = percent_changes.loc[
                                 percent_changes["symbol"] == symbol, "percent_change"
                             ].iloc[0]
-                            if abs(recent_change) >= config.config.PRICE_INCREASE_THRESHOLD / 2:
+                            if (
+                                abs(recent_change)
+                                >= config.config.PRICE_INCREASE_THRESHOLD / 2
+                            ):
                                 logger.info(
                                     f"{symbol} regained volatility (change: {recent_change:.2f}%). Resuming monitoring."
                                 )
                                 low_volatility_assets.discard(symbol)
-                                price_monitor_manager.start(symbol, portfolio, portfolio_lock, df)
+                                price_monitor_manager.start(
+                                    symbol, portfolio, portfolio_lock, df
+                                )
                         except (KeyError, IndexError) as e:
-                            logger.error(f"Error checking volatility for {symbol}: {e}", exc_info=True)
+                            logger.error(
+                                f"Error checking volatility for {symbol}: {e}",
+                                exc_info=True,
+                            )
             finally:
                 portfolio_lock.release()
         except Exception as e:
             logger.error(f"Error managing low volatility assets: {e}", exc_info=True)
 
-        return above_threshold.to_dict("records"), percent_changes, order_book_metrics_list
+        return (
+            above_threshold.to_dict("records"),
+            percent_changes,
+            order_book_metrics_list,
+        )
 
     except Exception as e:
         logger.error(f"Critical error in verify_and_analyze_data: {e}", exc_info=True)
         send_alert("Data Processing Failure", f"Critical error in data processing: {e}")
         return [], pd.DataFrame(), []
+
 
 def send_alert(subject, message):
     logger.error(f"ALERT: {subject} - {message}")
