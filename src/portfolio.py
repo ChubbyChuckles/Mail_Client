@@ -60,6 +60,30 @@ def fetch_trade_details_with_retry(symbol, start_time, end_time):
         raise ValueError(f"Failed to fetch trade details for {symbol}")
     return trade_count, largest_trade_volume_eur
 
+def calculate_bollinger_bands(close_prices, period=20, std_dev=2):
+    """
+    Calculate Bollinger Bands for given closing prices.
+
+    Args:
+        close_prices (np.array): Array of closing prices.
+        period (int): Period for the moving average (default: 20).
+        std_dev (float): Standard deviation multiplier (default: 2).
+
+    Returns:
+        tuple: (middle_band, upper_band, lower_band) as floats, or None if calculation fails.
+    """
+    try:
+        if len(close_prices) < period:
+            return None, None, None
+        sma = np.mean(close_prices[-period:])
+        rolling_std = np.std(close_prices[-period:])
+        upper_band = sma + std_dev * rolling_std
+        lower_band = sma - std_dev * rolling_std
+        return sma, upper_band, lower_band
+    except Exception as e:
+        logger.error(f"Error calculating Bollinger Bands: {e}", exc_info=True)
+        return None, None, None
+
 def sell_asset(
     symbol,
     asset,
@@ -342,7 +366,7 @@ def manage_portfolio(
     price_monitor_manager,
     order_book_metrics_list=None,
     sell_slippages=None,
-    combined_df=None,  # Add new parameter
+    combined_df=None,
 ):
     """
     Manages the portfolio by processing sell signals, updating assets, and buying new assets.
@@ -353,6 +377,7 @@ def manage_portfolio(
         price_monitor_manager: Instance of PriceMonitorManager.
         order_book_metrics_list (list): List of order book metrics to update with buy decisions.
         sell_slippages (dict): Dictionary of sell slippages for each asset (default: None).
+        combined_df (pandas.DataFrame): Combined OHLCV data for all symbols.
 
     Raises:
         ValueError: If inputs are invalid.
@@ -417,12 +442,10 @@ def manage_portfolio(
                 and portfolio.get("cash", 0) >= config.config.PORTFOLIO_VALUE * config.config.ALLOCATION_PER_TRADE
             ):
                 profitable_assets = [
-                    symbol
-                    for symbol, asset in portfolio.get("assets", {}).items()
+                    symbol for symbol, asset in portfolio.get("assets", {}).items()
                     if asset.get("current_price", 0) > asset.get("purchase_price", 0) * 1.01
                     and isinstance(asset.get("purchase_time"), datetime)
-                    and (datetime.utcnow() - asset["purchase_time"]).total_seconds() / 60
-                    >= config.config.MIN_HOLDING_MINUTES
+                    and (datetime.utcnow() - asset["purchase_time"]).total_seconds() / 60 >= config.config.MIN_HOLDING_MINUTES
                 ]
                 if profitable_assets:
                     for symbol in profitable_assets:
@@ -673,13 +696,45 @@ def manage_portfolio(
                         else:
                             logger.warning(f"Insufficient data for RSI calculation for {symbol} ({len(symbol_candles)} candles). Skipping RSI check.")
                 
+                # Calculate Bollinger Bands if enabled
+                bollinger_ok = True
+                if config.config.USE_BOLLINGER_BANDS:
+                    if combined_df is None:
+                        logger.warning(f"Cannot calculate Bollinger Bands for {symbol}: combined_df is None. Skipping Bollinger Bands check.")
+                        bollinger_ok = False
+                    else:
+                        symbol_candles = combined_df[combined_df["symbol"] == symbol]["close"].tail(config.config.BOLLINGER_PERIOD)
+                        logger.debug(f"{len(symbol_candles)} candles for Bollinger Bands calculation for {symbol}.")
+                        if len(symbol_candles) >= config.config.BOLLINGER_PERIOD:
+                            middle_band, upper_band, lower_band = calculate_bollinger_bands(
+                                symbol_candles.values,
+                                period=config.config.BOLLINGER_PERIOD,
+                                std_dev=config.config.BOLLINGER_STD_DEV
+                            )
+                            if middle_band is None or upper_band is None or lower_band is None:
+                                logger.warning(f"Failed to calculate Bollinger Bands for {symbol}. Skipping Bollinger Bands check.")
+                                bollinger_ok = False
+                            else:
+                                close_price = record["close_price"]
+                                if close_price >= upper_band:
+                                    logger.info(f"Cannot buy {symbol}: Price {close_price:.8f} is above upper Bollinger Band {upper_band:.8f}.")
+                                    continue
+                                elif close_price <= lower_band:
+                                    logger.info(f"Cannot buy {symbol}: Price {close_price:.8f} is below lower Bollinger Band {lower_band:.8f}.")
+                                    continue
+                                logger.debug(f"Bollinger Bands for {symbol}: Middle={middle_band:.2f}, Upper={upper_band:.2f}, Lower={lower_band:.2f}, Price={close_price:.2f}")
+                        else:
+                            logger.warning(f"Insufficient data for Bollinger Bands calculation for {symbol} ({len(symbol_candles)} candles). Skipping Bollinger Bands check.")
+                            bollinger_ok = False
+                
                 logger.debug(f"Evaluating buy for {symbol}: cash={portfolio.get('cash', 0):.2f}, "
                             f"required_cash={config.config.PORTFOLIO_VALUE * config.config.ALLOCATION_PER_TRADE:.2f}, "
                             f"assets={len(portfolio.get('assets', {}))}, max_assets={config.config.MAX_ACTIVE_ASSETS}, "
                             f"low_volatility={symbol in low_volatility_assets}, "
                             f"total_score={total_score:.2f}, min_score={config.config.MIN_TOTAL_SCORE:.2f}, "
                             f"slippage_buy={slippage_buy:.3f}%, max_slippage={config.config.MAX_SLIPPAGE_BUY:.3f}%, "
-                            f"rsi={rsi if rsi is not None else 'N/A'}")
+                            f"rsi={rsi if rsi is not None else 'N/A'}, "
+                            f"bollinger_ok={bollinger_ok}")
                 
                 if (
                     symbol not in portfolio.get("assets", {})
@@ -689,6 +744,7 @@ def manage_portfolio(
                     and total_score >= config.config.MIN_TOTAL_SCORE
                     and slippage_buy <= config.config.MAX_SLIPPAGE_BUY
                     and (not config.config.USE_RSI or (rsi is not None and config.config.RSI_MIN_SCORE <= rsi < config.config.RSI_OVERBOUGHT))
+                    and (not config.config.USE_BOLLINGER_BANDS or bollinger_ok)
                 ):
                     close_price = record["close_price"]
                     purchase_price = close_price * (1 + slippage_buy / 100)
@@ -742,7 +798,7 @@ def manage_portfolio(
                     logger.info(
                         f"Bought {quantity:.4f} {symbol} at {purchase_price:.4f} EUR (close {close_price:.4f}) "
                         f"for {actual_cost:.2f} EUR (after {slippage_buy:.2f}% slippage and {buy_fee:.2f} fee), "
-                        f"Trade Count: {trade_count}, Largest Trade Volume: €{largest_trade_volume_eur:.2f}, "
+                        f"Trade Count: {trade_count}, Largest Trade Volume DEPARTED: €{largest_trade_volume_eur:.2f}, "
                         f"RSI: {rsi:.2f}" if rsi is not None else f"Bought {quantity:.4f} {symbol} at {purchase_price:.4f} EUR (close {close_price:.4f}) "
                         f"for {actual_cost:.2f} EUR (after {slippage_buy:.2f}% slippage and {buy_fee:.2f} fee), "
                         f"Trade Count: {trade_count}, Largest Trade Volume: €{largest_trade_volume_eur:.2f}"
@@ -780,6 +836,10 @@ def manage_portfolio(
                         f"Cannot buy {symbol}: RSI {rsi:.2f} is outside acceptable range "
                         f"({config.config.RSI_MIN_SCORE} <= RSI < {config.config.RSI_OVERBOUGHT})."
                     )
+                elif config.config.USE_BOLLINGER_BANDS and not bollinger_ok:
+                    logger.info(
+                        f"Cannot buy {symbol}: Bollinger Bands conditions not met."
+                    )
                 elif symbol in portfolio.get("assets", {}):
                     logger.debug(f"Cannot buy {symbol}: Already owned.")
                 elif symbol in low_volatility_assets:
@@ -792,7 +852,8 @@ def manage_portfolio(
                             f"low_volatility={symbol in low_volatility_assets}, "
                             f"total_score={total_score:.2f} >= {config.config.MIN_TOTAL_SCORE}, "
                             f"slippage_buy={slippage_buy:.3f}% <= {config.config.MAX_SLIPPAGE_BUY}%, "
-                            f"rsi={rsi if rsi is not None else 'N/A'}")
+                            f"rsi={rsi if rsi is not None else 'N/A'}, "
+                            f"bollinger_ok={bollinger_ok}")
         finally:
             portfolio_lock.release()
     except ValueError as e:
@@ -858,7 +919,7 @@ def manage_portfolio(
 
 def send_alert(subject, message):
     """
-    Sends an alert for critical errors (placeholder).
+    Sends an alert for critical errors.
 
     Args:
         subject (str): The subject of the alert.

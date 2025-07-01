@@ -114,6 +114,9 @@ class Config:
         self.RSI_PERIOD = int(os.getenv("RSI_PERIOD", 14))
         self.RSI_OVERBOUGHT = int(os.getenv("RSI_OVERBOUGHT", 70))
         self.RSI_MIN_SCORE = int(os.getenv("RSI_MIN_SCORE", 30))
+        self.USE_BOLLINGER_BANDS = bool(os.getenv("USE_BOLLINGER_BANDS", True))  # Enable/disable Bollinger Bands for buy decisions
+        self.BOLLINGER_PERIOD = int(os.getenv("BOLLINGER_PERIOD", 20))  # Period for Bollinger Bands calculation
+        self.BOLLINGER_STD_DEV = self.parse_float_env("BOLLINGER_STD_DEV", 2.0)  # Standard deviation multiplier for Bollinger Bands    
 
         if self.MAX_ACTIVE_ASSETS < 1:
             logger.warning(
