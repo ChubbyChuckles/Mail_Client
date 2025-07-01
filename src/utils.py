@@ -122,7 +122,7 @@ def append_to_buy_trades_csv(trade_data):
     try:
         required_fields = [
             "Symbol", "Buy Quantity", "Buy Price", "Buy Time", "Buy Fee", 'Buy Slippage', 'Actual Cost',
-            "Allocation", "Trade Count", "Largest Trade Volume EUR"
+            "Allocation", "Trade Count", "Largest Trade Volume EUR", "RSI"
         ]
         if not all(field in trade_data for field in required_fields):
             raise ValueError(f"trade_data missing required fields: {set(required_fields) - set(trade_data.keys())}")
@@ -163,6 +163,54 @@ def append_to_buy_trades_csv(trade_data):
     except Exception as e:
         logger.error(f"Unexpected error appending to {config.config.BUY_TRADES_CSV}: {e}", exc_info=True)
         send_alert("Buy Trades CSV Failure", f"Unexpected error appending to buy trades CSV: {e}")
+
+import numpy as np
+
+def calculate_rsi(closes, period=14):
+    """
+    Calculate the Relative Strength Index (RSI) for a given series of closing prices.
+    
+    Args:
+        closes (list or np.array): Array of closing prices.
+        period (int): RSI period (default: 14).
+    
+    Returns:
+        float: RSI value, or None if insufficient data.
+    """
+    try:
+        if len(closes) < period:
+            return None
+        closes = np.array(closes)
+        deltas = np.diff(closes)
+        gains = np.where(deltas > 0, deltas, 0)
+        losses = np.where(deltas < 0, -deltas, 0)
+        
+        avg_gain = np.mean(gains[:period])
+        avg_loss = np.mean(losses[:period])
+        
+        if avg_loss == 0:
+            rs = np.inf if avg_gain > 0 else 0
+        else:
+            rs = avg_gain / avg_loss
+        
+        rsi = 100 - (100 / (1 + rs))
+        
+        for i in range(period, len(deltas)):
+            gain = gains[i]
+            loss = losses[i]
+            avg_gain = ((avg_gain * (period - 1)) + gain) / period
+            avg_loss = ((avg_loss * (period - 1)) + loss) / period
+            if avg_loss == 0:
+                rs = np.inf if avg_gain > 0 else 0
+            else:
+                rs = avg_gain / avg_loss
+            rsi = 100 - (100 / (1 + rs))
+        
+        return rsi
+    except Exception as e:
+        from .config import logger
+        logger.error(f"Error calculating RSI: {e}", exc_info=True)
+        return None
 
 def append_to_finished_trades_csv(trade_data):
     """

@@ -14,7 +14,7 @@ from . import config
 from .config import logger
 from .exchange import fetch_ticker_price, fetch_trade_details
 from .state import low_volatility_assets, negative_momentum_counts, portfolio, portfolio_lock
-from .utils import append_to_buy_trades_csv, append_to_finished_trades_csv, append_to_order_book_metrics_csv, calculate_dynamic_ema_period, calculate_ema
+from .utils import append_to_buy_trades_csv, append_to_finished_trades_csv, append_to_order_book_metrics_csv, calculate_dynamic_ema_period, calculate_ema, calculate_rsi
 from .bitvavo_order_metrics import calculate_order_book_metrics, fetch_order_book_with_retry
 
 from .telegram_notifications import TelegramNotifier
@@ -342,6 +342,7 @@ def manage_portfolio(
     price_monitor_manager,
     order_book_metrics_list=None,
     sell_slippages=None,
+    combined_df=None,  # Add new parameter
 ):
     """
     Manages the portfolio by processing sell signals, updating assets, and buying new assets.
@@ -370,6 +371,8 @@ def manage_portfolio(
             raise ValueError("order_book_metrics_list must be a list")
         if sell_slippages is not None and not isinstance(sell_slippages, dict):
             raise ValueError("sell_slippages must be a dictionary")
+        if combined_df is not None and not isinstance(combined_df, pd.DataFrame):
+            raise ValueError("combined_df must be a pandas DataFrame")
 
         current_time = datetime.utcnow()
         five_min_ago = current_time - timedelta(minutes=5)
@@ -648,12 +651,36 @@ def manage_portfolio(
                 if not metrics_found:
                     logger.warning(f"No matching metrics found for {symbol} in order_book_metrics_list")
                     continue
+                
+                # Calculate RSI if enabled
+                rsi = None
+                if config.config.USE_RSI:
+                    if combined_df is None:
+                        logger.warning(f"Cannot calculate RSI for {symbol}: combined_df is None. Skipping RSI check.")
+                    else:
+                        symbol_candles = combined_df[combined_df["symbol"] == symbol]["close"].tail(config.config.RSI_PERIOD)
+                        logger.debug(f"{len(symbol_candles)} candles for RSI calculation for {symbol}.")
+                        if len(symbol_candles) >= config.config.RSI_PERIOD:
+                            rsi = calculate_rsi(symbol_candles.values, config.config.RSI_PERIOD)
+                            if rsi is None:
+                                logger.warning(f"Failed to calculate RSI for {symbol}. Skipping RSI check.")
+                            elif rsi >= config.config.RSI_OVERBOUGHT:
+                                logger.info(f"Cannot buy {symbol}: RSI {rsi:.2f} is overbought (>= {config.config.RSI_OVERBOUGHT}).")
+                                continue
+                            elif rsi < config.config.RSI_MIN_SCORE:
+                                logger.info(f"Cannot buy {symbol}: RSI {rsi:.2f} is below minimum threshold ({config.config.RSI_MIN_SCORE}).")
+                                continue
+                        else:
+                            logger.warning(f"Insufficient data for RSI calculation for {symbol} ({len(symbol_candles)} candles). Skipping RSI check.")
+                
                 logger.debug(f"Evaluating buy for {symbol}: cash={portfolio.get('cash', 0):.2f}, "
                             f"required_cash={config.config.PORTFOLIO_VALUE * config.config.ALLOCATION_PER_TRADE:.2f}, "
                             f"assets={len(portfolio.get('assets', {}))}, max_assets={config.config.MAX_ACTIVE_ASSETS}, "
                             f"low_volatility={symbol in low_volatility_assets}, "
                             f"total_score={total_score:.2f}, min_score={config.config.MIN_TOTAL_SCORE:.2f}, "
-                            f"slippage_buy={slippage_buy:.3f}%, max_slippage={config.config.MAX_SLIPPAGE_BUY:.3f}%")
+                            f"slippage_buy={slippage_buy:.3f}%, max_slippage={config.config.MAX_SLIPPAGE_BUY:.3f}%, "
+                            f"rsi={rsi if rsi is not None else 'N/A'}")
+                
                 if (
                     symbol not in portfolio.get("assets", {})
                     and portfolio.get("cash", 0) >= config.config.PORTFOLIO_VALUE * config.config.ALLOCATION_PER_TRADE
@@ -661,6 +688,7 @@ def manage_portfolio(
                     and symbol not in low_volatility_assets
                     and total_score >= config.config.MIN_TOTAL_SCORE
                     and slippage_buy <= config.config.MAX_SLIPPAGE_BUY
+                    and (not config.config.USE_RSI or (rsi is not None and config.config.RSI_MIN_SCORE <= rsi < config.config.RSI_OVERBOUGHT))
                 ):
                     close_price = record["close_price"]
                     purchase_price = close_price * (1 + slippage_buy / 100)
@@ -674,7 +702,7 @@ def manage_portfolio(
                     if quantity <= 0:
                         logger.warning(f"Cannot buy {symbol}: Invalid quantity {quantity}")
                         continue
-                    actual_cost = quantity * purchase_price  # Actual cost including slippage
+                    actual_cost = quantity * purchase_price
                     try:
                         trade_count, largest_trade_volume_eur = fetch_trade_details_with_retry(
                             symbol, five_min_ago, current_time
@@ -693,6 +721,7 @@ def manage_portfolio(
                         "Actual Cost": f"{actual_cost:.2f}",
                         "Trade Count": trade_count,
                         "Largest Trade Volume EUR": f"{largest_trade_volume_eur:.2f}",
+                        "RSI": f"{rsi:.2f}" if rsi is not None else "N/A",
                     }
                     append_to_buy_trades_csv(buy_trade_data)
                     telegram_notifier.notify_buy_trade(buy_trade_data)
@@ -700,18 +729,21 @@ def manage_portfolio(
                         "quantity": quantity,
                         "purchase_price": purchase_price,
                         "purchase_time": current_time,
-                        "buy_slippage": slippage_buy,  # Store positive percentage
-                        "buy_fee": buy_fee,  # Add this line
+                        "buy_slippage": slippage_buy,
+                        "buy_fee": buy_fee,
                         "highest_price": purchase_price,
-                        "current_price": close_price,  # Use close_price for current valuation
+                        "current_price": close_price,
                         "profit_target": config.config.PROFIT_TARGET,
                         "original_profit_target": config.config.PROFIT_TARGET,
                         "sell_price": purchase_price * (1 + config.config.PROFIT_TARGET),
                     }
                     portfolio["cash"] -= allocation
-                    total_asset_value += (quantity * close_price)  # Use original price for valuation
+                    total_asset_value += (quantity * close_price)
                     logger.info(
                         f"Bought {quantity:.4f} {symbol} at {purchase_price:.4f} EUR (close {close_price:.4f}) "
+                        f"for {actual_cost:.2f} EUR (after {slippage_buy:.2f}% slippage and {buy_fee:.2f} fee), "
+                        f"Trade Count: {trade_count}, Largest Trade Volume: €{largest_trade_volume_eur:.2f}, "
+                        f"RSI: {rsi:.2f}" if rsi is not None else f"Bought {quantity:.4f} {symbol} at {purchase_price:.4f} EUR (close {close_price:.4f}) "
                         f"for {actual_cost:.2f} EUR (after {slippage_buy:.2f}% slippage and {buy_fee:.2f} fee), "
                         f"Trade Count: {trade_count}, Largest Trade Volume: €{largest_trade_volume_eur:.2f}"
                     )
@@ -741,7 +773,12 @@ def manage_portfolio(
                     )
                 elif total_score <= config.config.MIN_TOTAL_SCORE:
                     logger.info(
-                        f"Cannot buy {symbol}: Total Score {total_score:.2f} is below threshold {config.config.MIN_TOTAL_SCORE:.2f}."
+                        f"Cannot buy {symbol}: Total Score {total_score:.2f} is below threshold ({config.config.MIN_TOTAL_SCORE:.2f}."
+                    )
+                elif config.config.USE_RSI and rsi is not None and (rsi < config.config.RSI_MIN_SCORE or rsi >= config.config.RSI_OVERBOUGHT):
+                    logger.info(
+                        f"Cannot buy {symbol}: RSI {rsi:.2f} is outside acceptable range "
+                        f"({config.config.RSI_MIN_SCORE} <= RSI < {config.config.RSI_OVERBOUGHT})."
                     )
                 elif symbol in portfolio.get("assets", {}):
                     logger.debug(f"Cannot buy {symbol}: Already owned.")
@@ -749,12 +786,13 @@ def manage_portfolio(
                     logger.debug(f"Cannot buy {symbol}: Marked as low volatility.")
                 else:
                     logger.info(f"Cannot buy {symbol}: Conditions not met - "
-                    f"in_portfolio={symbol in portfolio.get('assets', {})}, "
-                    f"sufficient_cash={portfolio.get('cash', 0) >= config.config.PORTFOLIO_VALUE * config.config.ALLOCATION_PER_TRADE}, "
-                    f"asset_limit={len(portfolio.get('assets', {})) < config.config.MAX_ACTIVE_ASSETS}, "
-                    f"low_volatility={symbol in low_volatility_assets}, "
-                    f"total_score={total_score:.2f} >= {config.config.MIN_TOTAL_SCORE}, "
-                    f"slippage_buy={slippage_buy:.3f}% <= {config.config.MAX_SLIPPAGE_BUY}%")
+                            f"in_portfolio={symbol in portfolio.get('assets', {})}, "
+                            f"sufficient_cash={portfolio.get('cash', 0) >= config.config.PORTFOLIO_VALUE * config.config.ALLOCATION_PER_TRADE}, "
+                            f"asset_limit={len(portfolio.get('assets', {})) < config.config.MAX_ACTIVE_ASSETS}, "
+                            f"low_volatility={symbol in low_volatility_assets}, "
+                            f"total_score={total_score:.2f} >= {config.config.MIN_TOTAL_SCORE}, "
+                            f"slippage_buy={slippage_buy:.3f}% <= {config.config.MAX_SLIPPAGE_BUY}%, "
+                            f"rsi={rsi if rsi is not None else 'N/A'}")
         finally:
             portfolio_lock.release()
     except ValueError as e:

@@ -110,6 +110,10 @@ class Config:
         self.MAX_SLIPPAGE_BUY = self.parse_float_env("MAX_SLIPPAGE_BUY", 0.05)
         self.MAX_SLIPPAGE_SELL = self.parse_float_env("MAX_SLIPPAGE_SELL", -0.05)
         self.MIN_TOTAL_SCORE = self.parse_float_env("MIN_TOTAL_SCORE", 0.7)
+        self.USE_RSI = bool(os.getenv("USE_RSI", True))
+        self.RSI_PERIOD = int(os.getenv("RSI_PERIOD", 14))
+        self.RSI_OVERBOUGHT = int(os.getenv("RSI_OVERBOUGHT", 70))
+        self.RSI_MIN_SCORE = int(os.getenv("RSI_MIN_SCORE", 30))
 
         if self.MAX_ACTIVE_ASSETS < 1:
             logger.warning(
