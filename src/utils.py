@@ -110,7 +110,7 @@ def calculate_dynamic_ema_period(
 
 def append_to_buy_trades_csv(trade_data):
     """
-    Appends buy trade data to a CSV file atomically.
+    Appends buy trade data to a CSV file without overwriting existing data.
 
     Args:
         trade_data (dict): Dictionary containing trade details with required fields.
@@ -133,14 +133,25 @@ def append_to_buy_trades_csv(trade_data):
         
         os.makedirs(os.path.dirname(file_path) or '.', exist_ok=True)
         
+        # Check if file exists and read existing data
+        existing_data = []
+        file_exists = os.path.exists(file_path)
+        
+        if file_exists:
+            with open(file_path, mode='r', newline='') as f:
+                reader = csv.DictReader(f)
+                if set(reader.fieldnames) != set(required_fields):
+                    logger.warning(f"Fieldnames mismatch in {file_path}. Existing: {reader.fieldnames}")
+                existing_data = [row for row in reader]
+        
+        # Append new trade data
+        existing_data.append(trade_data)
+        
+        # Write all data back to a temporary file and move it
         with tempfile.NamedTemporaryFile(mode='w', delete=False, newline='', suffix='.tmp') as temp_file:
-            writer = csv.DictWriter(
-                temp_file,
-                fieldnames=required_fields
-            )
-            if not os.path.exists(file_path):
-                writer.writeheader()
-            writer.writerow(trade_data)
+            writer = csv.DictWriter(temp_file, fieldnames=required_fields)
+            writer.writeheader()
+            writer.writerows(existing_data)
             temp_file.flush()
             os.fsync(temp_file.fileno())
         
@@ -155,7 +166,7 @@ def append_to_buy_trades_csv(trade_data):
 
 def append_to_finished_trades_csv(trade_data):
     """
-    Appends finished trade data to a CSV file atomically.
+    Appends finished trade data to a CSV file without overwriting existing data.
 
     Args:
         trade_data (dict): Dictionary containing finished trade details.
@@ -178,14 +189,25 @@ def append_to_finished_trades_csv(trade_data):
         
         os.makedirs(os.path.dirname(file_path) or '.', exist_ok=True)
         
+        # Check if file exists and read existing data
+        existing_data = []
+        file_exists = os.path.exists(file_path)
+        
+        if file_exists:
+            with open(file_path, mode='r', newline='') as f:
+                reader = csv.DictReader(f)
+                if set(reader.fieldnames) != set(required_fields):
+                    logger.warning(f"Fieldnames mismatch in {file_path}. Existing: {reader.fieldnames}")
+                existing_data = [row for row in reader]
+        
+        # Append new trade data
+        existing_data.append(trade_data)
+        
+        # Write all data back to a temporary file and move it
         with tempfile.NamedTemporaryFile(mode='w', delete=False, newline='', suffix='.tmp') as temp_file:
-            writer = csv.DictWriter(
-                temp_file,
-                fieldnames=required_fields
-            )
-            if not os.path.exists(file_path):
-                writer.writeheader()
-            writer.writerow(trade_data)
+            writer = csv.DictWriter(temp_file, fieldnames=required_fields)
+            writer.writeheader()
+            writer.writerows(existing_data)
             temp_file.flush()
             os.fsync(temp_file.fileno())
         
@@ -200,7 +222,7 @@ def append_to_finished_trades_csv(trade_data):
 
 def append_to_order_book_metrics_csv(metrics_list):
     """
-    Appends order book metrics to a CSV file atomically.
+    Appends order book metrics to a CSV file without overwriting existing data.
 
     Args:
         metrics_list (list): List of dictionaries containing order book metrics and buy status.
@@ -228,113 +250,131 @@ def append_to_order_book_metrics_csv(metrics_list):
             "Slippage_Sell", "Predicted_Price_Sell", "Bought", "Error"
         ]
         
+        # Check if file exists and read existing data
+        existing_data = []
+        file_exists = os.path.exists(file_path)
+        
+        if file_exists:
+            with open(file_path, mode='r', newline='') as f:
+                reader = csv.DictReader(f)
+                if set(reader.fieldnames) != set(fieldnames):
+                    logger.warning(f"Fieldnames mismatch in {file_path}. Existing: {reader.fieldnames}")
+                existing_data = [row for row in reader]
+        
+        # Prepare new rows
+        new_rows = []
+        for metrics in metrics_list:
+            if not isinstance(metrics, dict):
+                logger.warning(f"Skipping invalid metrics entry: {metrics}")
+                continue
+            row = {
+                "Timestamp": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
+                "Market": metrics.get("market"),
+                "Nonce": metrics.get("nonce"),
+                "Best_Bid": (
+                    f"{metrics['best_bid']:.2f}"
+                    if metrics.get("best_bid") is not None else None
+                ),
+                "Best_Ask": (
+                    f"{metrics['best_ask']:.2f}"
+                    if metrics.get("best_ask") is not None else None
+                ),
+                "Spread": (
+                    f"{metrics['spread']:.2f}"
+                    if metrics.get("spread") is not None else None
+                ),
+                "Spread_Percentage": (
+                    f"{metrics['spread_percentage']:.2f}"
+                    if metrics.get("spread_percentage") is not None else None
+                ),
+                "Mid_Price": (
+                    f"{metrics['mid_price']:.2f}"
+                    if metrics.get("mid_price") is not None else None
+                ),
+                "Buy_Depth": (
+                    f"{metrics['buy_depth']:.2f}"
+                    if metrics.get("buy_depth") is not None else None
+                ),
+                "Sell_Depth": (
+                    f"{metrics['sell_depth']:.2f}"
+                    if metrics.get("sell_depth") is not None else None
+                ),
+                "Total_Depth": (
+                    f"{metrics['total_depth']:.2f}"
+                    if metrics.get("total_depth") is not None else None
+                ),
+                "Bid_Volume": (
+                    f"{metrics['bid_volume']:.8f}"
+                    if metrics.get("bid_volume") is not None else None
+                ),
+                "Ask_Volume": (
+                    f"{metrics['ask_volume']:.8f}"
+                    if metrics.get("ask_volume") is not None else None
+                ),
+                "Bid_Value": (
+                    f"{metrics['bid_value']:.2f}"
+                    if metrics.get("bid_value") is not None else None
+                ),
+                "Ask_Value": (
+                    f"{metrics['ask_value']:.2f}"
+                    if metrics.get("ask_value") is not None else None
+                ),
+                "Order_Book_Imbalance": (
+                    f"{metrics['order_book_imbalance']:.2f}"
+                    if metrics.get("order_book_imbalance") is not None else None
+                ),
+                "Bid_Levels_Count": metrics.get("bid_levels_count"),
+                "Ask_Levels_Count": metrics.get("ask_levels_count"),
+                "Avg_Bid_Price": (
+                    f"{metrics['avg_bid_price']:.2f}"
+                    if metrics.get("avg_bid_price") is not None else None
+                ),
+                "Avg_Ask_Price": (
+                    f"{metrics['avg_ask_price']:.2f}"
+                    if metrics.get("avg_ask_price") is not None else None
+                ),
+                "VWAP_Bid": (
+                    f"{metrics['vwap_bid']:.2f}"
+                    if metrics.get("vwap_bid") is not None else None
+                ),
+                "VWAP_Ask": (
+                    f"{metrics['vwap_ask']:.2f}"
+                    if metrics.get("vwap_ask") is not None else None
+                ),
+                "Slippage_Buy": (
+                    f"{metrics['slippage_buy']:.2f}"
+                    if metrics.get("slippage_buy") is not None else None
+                ),
+                "Predicted_Price_Buy": (
+                    f"{metrics['predicted_price_buy']:.2f}"
+                    if metrics.get("predicted_price_buy") is not None else None
+                ),
+                "Slippage_Sell": (
+                    f"{metrics['slippage_sell']:.2f}"
+                    if metrics.get("slippage_sell") is not None else None
+                ),
+                "Predicted_Price_Sell": (
+                    f"{metrics['predicted_price_sell']:.2f}"
+                    if metrics.get("predicted_price_sell") is not None else None
+                ),
+                "Bought": metrics.get("bought", False),
+                "Error": metrics.get("error")
+            }
+            new_rows.append(row)
+        
+        # Combine existing and new data
+        existing_data.extend(new_rows)
+        
+        # Write all data back to a temporary file and move it
         with tempfile.NamedTemporaryFile(mode='w', delete=False, newline='', suffix='.tmp') as temp_file:
             writer = csv.DictWriter(temp_file, fieldnames=fieldnames)
-            if not os.path.exists(file_path):
-                writer.writeheader()
-            for metrics in metrics_list:
-                if not isinstance(metrics, dict):
-                    logger.warning(f"Skipping invalid metrics entry: {metrics}")
-                    continue
-                row = {
-                    "Timestamp": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
-                    "Market": metrics.get("market"),
-                    "Nonce": metrics.get("nonce"),
-                    "Best_Bid": (
-                        f"{metrics['best_bid']:.2f}"
-                        if metrics.get("best_bid") is not None else None
-                    ),
-                    "Best_Ask": (
-                        f"{metrics['best_ask']:.2f}"
-                        if metrics.get("best_ask") is not None else None
-                    ),
-                    "Spread": (
-                        f"{metrics['spread']:.2f}"
-                        if metrics.get("spread") is not None else None
-                    ),
-                    "Spread_Percentage": (
-                        f"{metrics['spread_percentage']:.2f}"
-                        if metrics.get("spread_percentage") is not None else None
-                    ),
-                    "Mid_Price": (
-                        f"{metrics['mid_price']:.2f}"
-                        if metrics.get("mid_price") is not None else None
-                    ),
-                    "Buy_Depth": (
-                        f"{metrics['buy_depth']:.2f}"
-                        if metrics.get("buy_depth") is not None else None
-                    ),
-                    "Sell_Depth": (
-                        f"{metrics['sell_depth']:.2f}"
-                        if metrics.get("sell_depth") is not None else None
-                    ),
-                    "Total_Depth": (
-                        f"{metrics['total_depth']:.2f}"
-                        if metrics.get("total_depth") is not None else None
-                    ),
-                    "Bid_Volume": (
-                        f"{metrics['bid_volume']:.8f}"
-                        if metrics.get("bid_volume") is not None else None
-                    ),
-                    "Ask_Volume": (
-                        f"{metrics['ask_volume']:.8f}"
-                        if metrics.get("ask_volume") is not None else None
-                    ),
-                    "Bid_Value": (
-                        f"{metrics['bid_value']:.2f}"
-                        if metrics.get("bid_value") is not None else None
-                    ),
-                    "Ask_Value": (
-                        f"{metrics['ask_value']:.2f}"
-                        if metrics.get("ask_value") is not None else None
-                    ),
-                    "Order_Book_Imbalance": (
-                        f"{metrics['order_book_imbalance']:.2f}"
-                        if metrics.get("order_book_imbalance") is not None else None
-                    ),
-                    "Bid_Levels_Count": metrics.get("bid_levels_count"),
-                    "Ask_Levels_Count": metrics.get("ask_levels_count"),
-                    "Avg_Bid_Price": (
-                        f"{metrics['avg_bid_price']:.2f}"
-                        if metrics.get("avg_bid_price") is not None else None
-                    ),
-                    "Avg_Ask_Price": (
-                        f"{metrics['avg_ask_price']:.2f}"
-                        if metrics.get("avg_ask_price") is not None else None
-                    ),
-                    "VWAP_Bid": (
-                        f"{metrics['vwap_bid']:.2f}"
-                        if metrics.get("vwap_bid") is not None else None
-                    ),
-                    "VWAP_Ask": (
-                        f"{metrics['vwap_ask']:.2f}"
-                        if metrics.get("vwap_ask") is not None else None
-                    ),
-                    "Slippage_Buy": (
-                        f"{metrics['slippage_buy']:.2f}"
-                        if metrics.get("slippage_buy") is not None else None
-                    ),
-                    "Predicted_Price_Buy": (
-                        f"{metrics['predicted_price_buy']:.2f}"
-                        if metrics.get("predicted_price_buy") is not None else None
-                    ),
-                    "Slippage_Sell": (
-                        f"{metrics['slippage_sell']:.2f}"
-                        if metrics.get("slippage_sell") is not None else None
-                    ),
-                    "Predicted_Price_Sell": (
-                        f"{metrics['predicted_price_sell']:.2f}"
-                        if metrics.get("predicted_price_sell") is not None else None
-                    ),
-                    "Bought": metrics.get("bought", False),
-                    "Error": metrics.get("error")
-                }
-                writer.writerow(row)
+            writer.writeheader()
+            writer.writerows(existing_data)
             temp_file.flush()
             os.fsync(temp_file.fileno())
         
         move_file_with_retry(temp_file.name, file_path)
-        # logger.info(f"Appended {len(metrics_list)} order book metrics to {file_path}")
+        logger.info(f"Appended {len(new_rows)} order book metrics to {file_path}")
     except (ValueError, OSError) as e:
         logger.error(f"Error appending to {config.config.ORDER_BOOK_METRICS_CSV}: {e}", exc_info=True)
         send_alert("Order Book Metrics CSV Failure", f"Error appending to order book metrics CSV: {e}")
