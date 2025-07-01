@@ -208,6 +208,9 @@ def main():
             if all_data:
                 try:
                     combined_df = pd.concat(all_data, ignore_index=True)
+                    logger.debug(f"Combined DataFrame has {len(combined_df)} rows, with {combined_df['symbol'].nunique()} unique symbols")
+                    for symbol in combined_df['symbol'].unique():
+                        logger.debug(f"Symbol {symbol} has {len(combined_df[combined_df['symbol'] == symbol])} candles")
                     output_path = (
                         f"{config.config.RESULTS_FOLDER}/"
                         f"{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}_"
@@ -235,6 +238,7 @@ def main():
                         percent_changes,
                         price_monitor_manager,
                         order_book_metrics_list,
+                        combined_df=combined_df,  # Add this argument
                     )
                 except Exception as e:
                     logger.error(f"Error managing portfolio: {e}", exc_info=True)
