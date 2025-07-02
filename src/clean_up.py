@@ -2,8 +2,65 @@ import glob
 import os
 from pathlib import Path
 from typing import List
+import shutil
+import datetime
 
 from .config import logger
+
+
+def move_files_to_archive(source_dir: str, archive_dir: str) -> None:
+    """
+    Safely moves all files from the source directory to the archive directory.
+
+    Args:
+        source_dir (str): Path to the source directory containing files to move.
+        archive_dir (str): Path to the archive directory where files will be moved.
+    """
+    try:
+        # Convert to Path objects for robust path handling
+        source_path = Path(source_dir)
+        archive_path = Path(archive_dir)
+
+        # Check if source directory exists and is a directory
+        if not source_path.exists():
+            logger.error(f"Source directory does not exist: {source_dir}")
+            return
+        if not source_path.is_dir():
+            logger.error(f"Source path is not a directory: {source_dir}")
+            return
+
+        # Create archive directory if it doesn't exist
+        archive_path.mkdir(parents=True, exist_ok=True)
+
+        # Get all files in the source directory
+        files = [f for f in source_path.glob("*") if f.is_file()]
+
+        if not files:
+            logger.info(f"No files found in source directory: {source_dir}")
+            return
+
+        # Move each file to the archive directory
+        moved_files = 0
+        for file in files:
+            try:
+                destination_file = archive_path / file.name
+                # Check if file already exists in archive
+                if destination_file.exists():
+                    # Append timestamp to avoid overwriting
+                    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                    destination_file = archive_path / f"{file.stem}_{timestamp}{file.suffix}"
+                shutil.move(str(file), str(destination_file))
+                logger.info(f"Moved file: {file} to {destination_file}")
+                moved_files += 1
+            except PermissionError:
+                logger.error(f"Permission denied when moving file: {file}")
+            except Exception as e:
+                logger.error(f"Error moving file {file}: {str(e)}")
+
+        logger.info(f"Moved {moved_files} files from {source_dir} to {archive_dir}")
+
+    except Exception as e:
+        logger.error(f"Error processing source directory {source_dir}: {str(e)}")
 
 
 def delete_old_files(directories: List[str], keep_count: int = 5) -> None:
@@ -31,7 +88,7 @@ def delete_old_files(directories: List[str], keep_count: int = 5) -> None:
             files = [f for f in dir_path.glob("*") if f.is_file()]
 
             if not files:
-                # logger.info(f"No files found in directory: {directory}")
+                logger.info(f"No files found in directory: {directory}")
                 continue
 
             # Sort files by modification time (most recent first)
@@ -41,34 +98,44 @@ def delete_old_files(directories: List[str], keep_count: int = 5) -> None:
             files_to_delete = files[keep_count:]
 
             if not files_to_delete:
-                # logger.info(f"Directory {directory} has {len(files)} files, all will be kept (less than or equal to {keep_count})")
+                logger.info(f"Directory {directory} has {len(files)} files, all will be kept (less than or equal to {keep_count})")
                 continue
 
             # Delete older files
             for file in files_to_delete:
                 try:
                     file.unlink()
-                    # logger.info(f"Deleted file: {file}")
+                    logger.info(f"Deleted file: {file}")
                 except PermissionError:
                     logger.error(f"Permission denied when deleting file: {file}")
                 except Exception as e:
                     logger.error(f"Error deleting file {file}: {str(e)}")
 
-            # logger.info(f"Directory {directory}: Kept {min(keep_count, len(files))} files, deleted {len(files_to_delete)} files")
+            logger.info(f"Directory {directory}: Kept {min(keep_count, len(files))} files, deleted {len(files_to_delete)} files")
 
         except Exception as e:
             logger.error(f"Error processing directory {directory}: {str(e)}")
 
 
 def garbage_collection():
-    # Define the list of directories to process
+    # Define the list of directories to process for deletion
     directories = [
         "trading_logs",
-        "data_1m_pq_alot",
-        # "/path/to/directory3"
+        # Add other directories if needed
     ]
 
+    # Define source and archive directories for moving files
+    source_dir = "data_1m_pq_alot"  # Source directory with Parquet files
+    archive_dir = r"F:\Crypto_Trading\Market_Data"  # Destination archive directory
+
     try:
+        # Move files from source to archive
+        move_files_to_archive(source_dir, archive_dir)
+
+        # Perform garbage collection on directories (including archive if desired)
+        # directories.append(archive_dir)  # Optionally include archive for cleanup
         delete_old_files(directories, keep_count=5)
     except Exception as e:
-        logger.error(f"Unexpected error: {str(e)}")
+        logger.error(f"Unexpected error in garbage collection: {str(e)}")
+
+

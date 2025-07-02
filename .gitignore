@@ -6,14 +6,12 @@ __pycache__/
 *.parquet
 *.bat
 *.png
+*.csv
 *.json.backup*
 .venv/
 data_1m_pq_alot/
 trading_logs/
-buy_trades.csv
 .pytest_cache/
 assets_bought/
 assets_sold/
-finished_trades.csv
-order_book_metrics.csv
 order_book_snapshots
