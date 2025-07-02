@@ -268,5 +268,5 @@ def visualize_market_trends_by_weekday(folder_path, time_window_minutes=50):
     print("Best trading times saved to 'best_trading_times.csv'")
 
 # Example usage
-folder_path = "data_1m_pq_alot"  # Replace with your folder path
+folder_path = r"F:\Crypto_Trading\Market_Data"  # Replace with your folder path
 visualize_market_trends_by_weekday(folder_path, time_window_minutes=50)
