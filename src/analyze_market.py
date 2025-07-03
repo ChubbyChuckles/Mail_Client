@@ -157,6 +157,10 @@ def visualize_market_trends_by_weekday(folder_path, time_window_minutes=50):
     - folder_path (str): Path to the folder containing Parquet files.
     - time_window_minutes (int): Number of minutes to analyze per file (default: 50).
     """
+    # Create plots subfolder
+    plots_dir = os.path.join(os.getcwd(), 'plots')
+    os.makedirs(plots_dir, exist_ok=True)
+    
     # Get list of Parquet files
     files = [f for f in os.listdir(folder_path) if f.endswith('.parquet')]
     if not files:
@@ -197,7 +201,14 @@ def visualize_market_trends_by_weekday(folder_path, time_window_minutes=50):
         'total_volume': 'mean',
         'trade_signal': lambda x: pd.Series(x).mode()[0] if not x.empty else 'Neutral',
         'n_coins': 'mean',
-        'n_missing': 'mean'
+        'n_missing': 'mean',
+        'mbi': 'mean',
+        'vwpm': 'mean',
+        'vas': 'mean',
+        'mc_oscillator': 'mean',
+        'csm': 'mean',
+        'ad_ratio': 'mean',
+        'volume_ratio': 'mean'
     }).reset_index()
     
     # Ensure all weekdays and hours are present
@@ -208,50 +219,59 @@ def visualize_market_trends_by_weekday(folder_path, time_window_minutes=50):
     agg_results['bullish_metrics'] = agg_results['bullish_metrics'].fillna(0.5)  # Neutral sentiment
     agg_results['total_volume'] = agg_results['total_volume'].fillna(0.0)  # No volume
     agg_results['trade_signal'] = agg_results['trade_signal'].fillna('Neutral')
+    agg_results['mbi'] = agg_results['mbi'].fillna(0.5)  # Neutral MBI
+    agg_results['vwpm'] = agg_results['vwpm'].fillna(0.0)
+    agg_results['vas'] = agg_results['vas'].fillna(0.0)
+    agg_results['mc_oscillator'] = agg_results['mc_oscillator'].fillna(0.0)
+    agg_results['csm'] = agg_results['csm'].fillna(0.0)
+    agg_results['ad_ratio'] = agg_results['ad_ratio'].fillna(1.0)  # Neutral ratio
+    agg_results['volume_ratio'] = agg_results['volume_ratio'].fillna(1.0)  # Neutral ratio
     
-    # Pivot for heatmaps
-    pivot_sentiment = agg_results.pivot(index='weekday', columns='hour', values='bullish_metrics')
-    pivot_volume = agg_results.pivot(index='weekday', columns='hour', values='total_volume')
-    pivot_signals = agg_results.pivot(index='weekday', columns='hour', values='trade_signal')
+    # Cap ad_ratio and volume_ratio for visualization
+    agg_results['ad_ratio_capped'] = agg_results['ad_ratio'].clip(upper=10)
+    agg_results['volume_ratio_capped'] = agg_results['volume_ratio'].clip(upper=10)
     
-    # Reorder weekdays
-    pivot_sentiment = pivot_sentiment.reindex(weekdays)
-    pivot_volume = pivot_volume.reindex(weekdays)
-    pivot_signals = pivot_signals.reindex(weekdays)
+    # List of metrics to plot
+    metrics = [
+        ('bullish_metrics', 'Average Bullish Sentiment', 'RdYlGn', 0.0, 1.0, '.2f'),
+        ('total_volume', 'Average Trading Volume', 'Blues', None, None, '.2e'),
+        ('mbi', 'Market Breadth Index (MBI)', 'RdYlGn', 0.0, 1.0, '.2f'),
+        ('vwpm', 'Volume-Weighted Price Momentum (VWPM)', 'RdYlGn', -1.0, 1.0, '.2f'),
+        ('vas', 'Volatility-Adjusted Sentiment (VAS)', 'RdYlGn', -1.0, 1.0, '.2f'),
+        ('mc_oscillator', 'McClellan Oscillator', 'RdYlGn', -50.0, 50.0, '.2f'),
+        ('csm', 'Cross-Sectional Momentum (CSM)', 'RdYlGn', -5.0, 5.0, '.2f'),
+        ('ad_ratio_capped', 'Advance/Decline Ratio (Capped)', 'RdYlGn', 0.0, 10.0, '.2f'),
+        ('volume_ratio_capped', 'Bullish/Bearish Volume Ratio (Capped)', 'RdYlGn', 0.0, 10.0, '.2f')
+    ]
     
-    # Plot heatmaps
-    plt.figure(figsize=(20, 10))
-    
-    # Sentiment Heatmap
-    plt.subplot(1, 2, 1)
-    sns.heatmap(pivot_sentiment, cmap='RdYlGn', vmin=0.0, vmax=1.0, annot=True, fmt='.2f')
-    plt.title('Average Bullish Sentiment by Weekday and Hour (CEST)')
-    plt.xlabel('Hour of Day')
-    plt.ylabel('Weekday')
-    
-    # Volume Heatmap
-    plt.subplot(1, 2, 2)
-    sns.heatmap(pivot_volume, cmap='Blues', annot=True, fmt='.2e')
-    plt.title('Average Trading Volume by Weekday and Hour (CEST)')
-    plt.xlabel('Hour of Day')
-    plt.ylabel('Weekday')
-    
-    plt.tight_layout()
-    plt.savefig('market_activity_sentiment_heatmap.png')
-    plt.close()
-    print("Heatmaps saved as 'market_activity_sentiment_heatmap.png'")
+    # Plot heatmaps for each metric
+    for metric, title, cmap, vmin, vmax, fmt in metrics:
+        plt.figure(figsize=(12, 6))
+        pivot_metric = agg_results.pivot(index='weekday', columns='hour', values=metric)
+        pivot_metric = pivot_metric.reindex(weekdays)
+        sns.heatmap(pivot_metric, cmap=cmap, vmin=vmin, vmax=vmax, annot=True, fmt=fmt)
+        plt.title(f'{title} by Weekday and Hour (CEST)')
+        plt.xlabel('Hour of Day')
+        plt.ylabel('Weekday')
+        plt.tight_layout()
+        plt.savefig(os.path.join(plots_dir, f'{metric}_heatmap.png'))
+        plt.close()
+        print(f"Heatmap for {metric} saved as '{os.path.join(plots_dir, f'{metric}_heatmap.png')}'")
     
     # Plot trading signals
-    plt.figure(figsize=(15, 5))
+    plt.figure(figsize=(12, 6))
     signal_values = {'Bullish': 1, 'Neutral': 0, 'Bearish': -1}
+    pivot_signals = agg_results.pivot(index='weekday', columns='hour', values='trade_signal')
+    pivot_signals = pivot_signals.reindex(weekdays)
     pivot_signals_numeric = pivot_signals.replace(signal_values)
     sns.heatmap(pivot_signals_numeric, cmap='RdYlGn', vmin=-1, vmax=1, annot=pivot_signals, fmt='')
     plt.title('Dominant Trading Signal by Weekday and Hour (CEST)')
     plt.xlabel('Hour of Day')
     plt.ylabel('Weekday')
-    plt.savefig('trading_signals_heatmap.png')
+    plt.tight_layout()
+    plt.savefig(os.path.join(plots_dir, 'trading_signals_heatmap.png'))
     plt.close()
-    print("Trading signals heatmap saved as 'trading_signals_heatmap.png'")
+    print(f"Trading signals heatmap saved as '{os.path.join(plots_dir, 'trading_signals_heatmap.png')}'")
     
     # Save results to CSV
     agg_results.to_csv('market_trend_weekly_results.csv', index=False)

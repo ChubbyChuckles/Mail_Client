@@ -11,6 +11,7 @@ __pycache__/
 .venv/
 data_1m_pq_alot/
 trading_logs/
+plots/
 .pytest_cache/
 assets_bought/
 assets_sold/
