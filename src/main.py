@@ -191,11 +191,7 @@ def main():
 
             active_monitors = price_monitor_manager.active_monitors()
             adjusted_concurrency = max(
-                1,
-                min(
-                    config.config.CONCURRENT_REQUESTS_GITHUB if IS_GITHUB_ACTIONS else config.config.CONCURRENT_REQUESTS,
-                    20 - active_monitors
-                )
+                1, min(config.config.CONCURRENT_REQUESTS - active_monitors, 20)
             )
             logger.info(
                 f"{YELLOW}ACTIVE MONITORS:{RESET} {active_monitors}     |     "
