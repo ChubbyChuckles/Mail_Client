@@ -2,7 +2,7 @@ name: Crypto Analysis Hourly
 
 on:
   schedule:
-    - cron: '0 * * * *'  # Runs every hour at minute 0 (e.g., 1:00, 2:00, etc., UTC)
+    - cron: '45 * * * *'  # Runs every hour at minute 0 (e.g., 1:00, 2:00, etc., UTC)
   workflow_dispatch:  # Allows manual triggering from the GitHub Actions tab
 
 jobs:
