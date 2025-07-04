@@ -259,7 +259,10 @@ def main():
                         f"{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}_"
                         f"{config.config.PARQUET_FILENAME}"
                     )
-                    save_to_local(combined_df, output_path)
+                    if IS_GITHUB_ACTIONS:
+                        logger.info("Skip saving parquet file.")
+                    else:
+                        save_to_local(combined_df, output_path)
                 except pd.errors.EmptyDataError as e:
                     logger.error(f"Error concatenating data: {e}", exc_info=True)
                     continue
