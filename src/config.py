@@ -127,7 +127,7 @@ class Config:
         self.PROFIT_TARGET = float(os.getenv("PROFIT_TARGET", 0.05))
         self.MIN_HOLDING_MINUTES = float(os.getenv("MIN_HOLDING_MINUTES", 6))
         self.TIME_STOP_MINUTES = int(os.getenv("TIME_STOP_MINUTES", 180))
-        self.CAT_LOSS_THRESHOLD = float(os.getenv("CAT_LOSS_THRESHOLD", -0.08))
+        self.CAT_LOSS_THRESHOLD = float(os.getenv("CAT_LOSS_THRESHOLD", 0.08))
         self.MOMENTUM_CONFIRM_MINUTES = int(os.getenv("MOMENTUM_CONFIRM_MINUTES", 3))
         self.MOMENTUM_THRESHOLD = float(os.getenv("MOMENTUM_THRESHOLD", -0.25))
         # Adjust portfolio file path for GitHub Actions
