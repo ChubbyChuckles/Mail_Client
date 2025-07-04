@@ -1,0 +1,94 @@
+name: Trading Bot
+
+on:
+  # Run every 4 hours
+  schedule:
+    - cron: '0 */4 * * *'  # Runs at 00:00, 04:00, 08:00, 12:00, 16:00, 20:00 UTC daily
+  # Allow manual triggering
+  workflow_dispatch:
+  # Run on push to the 'github' branch
+  push:
+    branches:
+      - github
+  # Run on pull requests targeting the 'github' branch
+  pull_request:
+    branches:
+      - github
+
+jobs:
+  trading-bot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 243  # 4 hours and 3 minutes
+
+    steps:
+      # Checkout the repository (github branch)
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: github
+
+      # Restore artifacts from the previous run (if available)
+      - name: Restore previous artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: trading-bot-outputs
+          path: /tmp
+        continue-on-error: true  # Continue even if no artifacts exist (e.g., first run)
+
+      # Set up Python
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10.9'
+
+      # Install dependencies
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      # Copy restored files to working directory
+      - name: Copy restored files
+        run: |
+          mkdir -p /tmp/data_1m_pq_alot
+          if [ -f /tmp/portfolio.json ]; then
+            cp /tmp/portfolio.json .
+          fi
+          if [ -f /tmp/buy_trades.csv ]; then
+            cp /tmp/buy_trades.csv .
+          fi
+          if [ -f /tmp/finished_trades.csv ]; then
+            cp /tmp/finished_trades.csv .
+          fi
+          if [ -f /tmp/order_book_metrics.csv ]; then
+            cp /tmp/order_book_metrics.csv .
+          fi
+          if ls /tmp/data_1m_pq_alot/*.parquet >/dev/null 2>&1; then
+            cp /tmp/data_1m_pq_alot/*.parquet data_1m_pq_alot/ || true
+          fi
+
+      # Run the trading bot
+      - name: Run trading bot
+        env:
+          BITVAVO_API_KEY: ${{ secrets.BITVAVO_API_KEY }}
+          BITVAVO_API_SECRET: ${{ secrets.BITVAVO_API_SECRET }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          CONCURRENT_REQUESTS_GITHUB: 10
+        run: |
+          python main.py
+
+      # Archive output files for the next run
+      - name: Archive output files
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: trading-bot-outputs
+          path: |
+            /tmp/*.csv
+            /tmp/portfolio.json
+            /tmp/data_1m_pq_alot/*.parquet
+            *.csv
+            portfolio.json
+            data_1m_pq_alot/*.parquet
+          retention-days: 7

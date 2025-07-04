@@ -5,6 +5,7 @@ import shutil
 import tempfile
 import time
 from datetime import datetime
+import glob
 
 import pandas as pd
 import pyarrow as pa
@@ -13,9 +14,14 @@ from tenacity import (retry, retry_if_exception_type, stop_after_attempt,
                       wait_exponential)
 
 from . import config
-from .config import logger
+from .config import logger, IS_GITHUB_ACTIONS
 from .state import portfolio, portfolio_lock
+from .telegram_notifications import TelegramNotifier
 
+# Initialize TelegramNotifier for alerts
+telegram_notifier = TelegramNotifier(
+    bot_token=config.config.TELEGRAM_BOT_TOKEN, chat_id=config.config.TELEGRAM_CHAT_ID
+)
 
 @retry(
     stop=stop_after_attempt(3),
@@ -79,7 +85,11 @@ def save_to_local(df, output_path):
             table = pa.Table.from_pandas(combined_df, preserve_index=False)
             pq.write_table(table, temp_file.name)
             move_file_with_retry(temp_file.name, output_path)
-            # logger.info(f"Saved {len(df)} records to {output_path}")
+            logger.info(f"Saved {len(df)} records to {output_path}")
+
+            # In GitHub Actions, log file creation for artifact tracking
+            if IS_GITHUB_ACTIONS:
+                logger.info(f"Parquet file saved at {output_path} for artifact collection")
         finally:
             if os.path.exists(temp_file.name):
                 try:
@@ -119,7 +129,7 @@ def save_to_local(df, output_path):
 
 def save_portfolio():
     """
-    Saves the current portfolio state to a JSON file atomically.
+    Saves the current portfolio state to a JSON file and maintains only the 3 latest backup files atomically.
 
     Raises:
         ValueError: If portfolio data is invalid.
@@ -150,29 +160,67 @@ def save_portfolio():
                 },
             }
             file_path = config.config.PORTFOLIO_FILE
-            os.makedirs(os.path.dirname(file_path), exist_ok=True)
+            if not file_path or not os.path.basename(file_path):
+                raise ValueError(f"Invalid PORTFOLIO_FILE path: {file_path}")
 
+            os.makedirs(os.path.dirname(file_path) or ".", exist_ok=True)
             with tempfile.NamedTemporaryFile(
                 mode="w", delete=False, suffix=".json"
             ) as temp_file:
                 json.dump(portfolio_copy, temp_file, indent=4)
-                temp_file.flush()  # Ensure data is written to disk
-                os.fsync(
-                    temp_file.fileno()
-                )  # Ensure data is flushed to disk on Windows
-
+                temp_file.flush()
+                os.fsync(temp_file.fileno())
             move_file_with_retry(temp_file.name, file_path)
             logger.info(f"Saved portfolio to {file_path}")
+
+            # Save to backup file, but skip in GitHub Actions to reduce disk usage
+            if not IS_GITHUB_ACTIONS:
+                backup_file = (
+                    f"{file_path}.backup_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}"
+                )
+                with tempfile.NamedTemporaryFile(
+                    mode="w", delete=False, suffix=".json"
+                ) as temp_file:
+                    json.dump(portfolio_copy, temp_file, indent=4)
+                    temp_file.flush()
+                    os.fsync(temp_file.fileno())
+                move_file_with_retry(temp_file.name, backup_file)
+                logger.info(f"Saved portfolio backup to {backup_file}")
+
+                # Manage backup files: keep only the 3 latest
+                backup_files = glob.glob(f"{file_path}.backup_*")
+                backup_files.sort(key=lambda x: x.split("backup_")[-1], reverse=True)
+                for old_file in backup_files[3:]:
+                    try:
+                        os.remove(old_file)
+                        logger.debug(f"Deleted old backup file: {old_file}")
+                    except OSError as e:
+                        logger.warning(
+                            f"Error deleting old backup file {old_file}: {e}", exc_info=True
+                        )
+
+            # In GitHub Actions, log file creation for artifact tracking
+            if IS_GITHUB_ACTIONS:
+                logger.info(f"Portfolio file saved at {file_path} for artifact collection")
         finally:
             portfolio_lock.release()
-    except (ValueError, OSError, TypeError) as e:
+    except ValueError as e:
         logger.error(
-            f"Error saving portfolio to {config.config.PORTFOLIO_FILE}: {e}",
+            f"Validation error saving portfolio to {config.config.PORTFOLIO_FILE}: {e}",
             exc_info=True,
         )
         send_alert(
             "Portfolio Save Failure",
-            f"Error saving portfolio to {config.config.PORTFOLIO_FILE}: {e}",
+            f"Validation error saving portfolio to {config.config.PORTFOLIO_FILE}: {e}",
+        )
+    except OSError as e:
+        logger.error(
+            f"File operation error saving portfolio to {config.config.PORTFOLIO_FILE}: {e}",
+            exc_info=True,
+        )
+        send_alert(
+            "Portfolio Save Failure",
+            f"File operation error saving portfolio to {config.config.PORTFOLIO_FILE}: {e}",
         )
     except Exception as e:
         logger.error(
@@ -187,10 +235,13 @@ def save_portfolio():
 
 def send_alert(subject, message):
     """
-    Sends an alert for critical errors (placeholder).
+    Sends an alert for critical errors using TelegramNotifier.
 
     Args:
         subject (str): The subject of the alert.
         message (str): The alert message.
     """
-    logger.error(f"ALERT: {subject} - {message}")
+    try:
+        telegram_notifier.notify_error(subject, message)
+    except Exception as e:
+        logger.error(f"Failed to send alert: {subject} - {message}. Error: {e}", exc_info=True)
