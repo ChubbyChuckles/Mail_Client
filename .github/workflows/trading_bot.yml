@@ -76,7 +76,7 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           CONCURRENT_REQUESTS_GITHUB: 10
         run: |
-          python main.py
+          python src/main.py
 
       # Archive output files for the next run
       - name: Archive output files
