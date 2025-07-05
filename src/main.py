@@ -24,7 +24,7 @@ from .print_trade_variables import print_trade_variables
 from .state import (ban_expiry_time, is_banned, low_volatility_assets,
                     portfolio, portfolio_lock)
 from .storage import save_to_local
-from .send_portfolio import send_portfolio
+from .send_portfolio import send_portfolio, send_startup_message, send_shutdown_message
 import asyncio
 
 
@@ -88,6 +88,7 @@ def load_markets_with_retry():
     return bitvavo.load_markets()
 
 def main():
+    global CYCLES
     price_monitor_manager = PriceMonitorManager()
     start_time = time.time()
     try:
@@ -110,6 +111,7 @@ def main():
 
         try:
             garbage_collection()
+            send_startup_message()
         except Exception as e:
             logger.error(f"Error in garbage collection: {e}", exc_info=True)
 
@@ -387,6 +389,7 @@ def perform_shutdown(price_monitor_manager):
         )
     try:
         save_portfolio()
+        send_shutdown_message()
     except Exception as e:
         logger.error(f"Error saving portfolio during shutdown: {e}", exc_info=True)
     try:

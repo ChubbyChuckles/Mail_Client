@@ -5,9 +5,18 @@ from datetime import datetime
 import logging
 import telegram  # Use python-telegram-bot==13.7 for synchronous API
 from . import config
-from .config import IS_GITHUB_ACTIONS, logger
+from .config import IS_GITHUB_ACTIONS
 
-
+# Configure logging
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
+if IS_GITHUB_ACTIONS:
+    handler = logging.StreamHandler()
+else:
+    os.makedirs("trading_logs", exist_ok=True)
+    handler = logging.FileHandler("trading_logs/send_portfolio.log")
+handler.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))
+logger.addHandler(handler)
 
 def format_portfolio_message(portfolio_data):
     """Formats the portfolio data into a visually appealing Telegram message."""
@@ -68,6 +77,66 @@ def format_portfolio_message(portfolio_data):
         logger.error(f"Error formatting portfolio message: {e}", exc_info=True)
         return f"⚠️ Error formatting portfolio data: {str(e)}"
 
+def send_startup_message():
+    """Sends a Telegram message signaling the bot has started."""
+    bot_token = config.config.TELEGRAM_BOT_TOKEN
+    chat_id = config.config.TELEGRAM_CHAT_ID
+
+    if not bot_token or not chat_id:
+        logger.error("Telegram bot token or chat ID not configured")
+        return
+
+    try:
+        bot = telegram.Bot(token=bot_token)
+        message = (
+            "🚀 *Trading Bot Started* 🚀\n"
+            "✅ *Status*: Initialized and running\n"
+            f"🕒 *Started*: {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')}\n"
+            f"🌐 *Environment*: {'GitHub Actions' if IS_GITHUB_ACTIONS else 'Local'}"
+        )
+        bot.send_message(
+            chat_id=chat_id,
+            text=message,
+            parse_mode=telegram.ParseMode.MARKDOWN
+        )
+        logger.info("Sent startup message via Telegram")
+    except telegram.error.InvalidToken:
+        logger.error("Invalid Telegram bot token")
+    except telegram.error.TelegramError as e:
+        logger.error(f"Telegram error sending startup message: {e}", exc_info=True)
+    except Exception as e:
+        logger.error(f"Error sending startup message: {e}", exc_info=True)
+
+def send_shutdown_message():
+    """Sends a Telegram message signaling the bot has shut down."""
+    bot_token = config.config.TELEGRAM_BOT_TOKEN
+    chat_id = config.config.TELEGRAM_CHAT_ID
+
+    if not bot_token or not chat_id:
+        logger.error("Telegram bot token or chat ID not configured")
+        return
+
+    try:
+        bot = telegram.Bot(token=bot_token)
+        message = (
+            "🛑 *Trading Bot Shut Down* 🛑\n"
+            "✅ *Status*: Gracefully stopped\n"
+            f"🕒 *Stopped*: {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')}\n"
+            f"🌐 *Environment*: {'GitHub Actions' if IS_GITHUB_ACTIONS else 'Local'}"
+        )
+        bot.send_message(
+            chat_id=chat_id,
+            text=message,
+            parse_mode=telegram.ParseMode.MARKDOWN
+        )
+        logger.info("Sent shutdown message via Telegram")
+    except telegram.error.InvalidToken:
+        logger.error("Invalid Telegram bot token")
+    except telegram.error.TelegramError as e:
+        logger.error(f"Telegram error sending shutdown message: {e}", exc_info=True)
+    except Exception as e:
+        logger.error(f"Error sending shutdown message: {e}", exc_info=True)
+
 def send_portfolio():
     """Reads portfolio.json and sends the formatted data via Telegram synchronously."""
     portfolio_path = "/tmp/portfolio.json" if IS_GITHUB_ACTIONS else "portfolio.json"
@@ -78,7 +147,6 @@ def send_portfolio():
         logger.error("Telegram bot token or chat ID not configured")
         return
 
-    # Initialize Telegram bot
     try:
         bot = telegram.Bot(token=bot_token)
     except telegram.error.InvalidToken:
