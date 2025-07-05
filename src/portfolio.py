@@ -17,21 +17,15 @@ from tenacity import (retry, retry_if_exception_type, stop_after_attempt,
 from . import config
 from .bitvavo_order_metrics import (calculate_order_book_metrics,
                                     fetch_order_book_with_retry)
-from .config import logger
+from .config import IS_GITHUB_ACTIONS, logger
 from .exchange import fetch_ticker_price, fetch_trade_details
 from .state import (low_volatility_assets, negative_momentum_counts, portfolio,
                     portfolio_lock)
-from .telegram_notifications import TelegramNotifier
 from .utils import (append_to_buy_trades_csv, append_to_finished_trades_csv,
                     append_to_order_book_metrics_csv,
                     calculate_dynamic_ema_period, calculate_ema, calculate_rsi)
 
-portfolio_values = []  # At the top of portfolio.py
-
-telegram_notifier = TelegramNotifier(
-    bot_token=config.config.TELEGRAM_BOT_TOKEN, chat_id=config.config.TELEGRAM_CHAT_ID
-)
-asyncio.run_coroutine_threadsafe(telegram_notifier.start(), asyncio.get_event_loop())
+portfolio_values = []  # Store portfolio value history
 
 
 @retry(
@@ -92,6 +86,10 @@ def calculate_bollinger_bands(close_prices, period=20, std_dev=2):
         return sma, upper_band, lower_band
     except Exception as e:
         logger.error(f"Error calculating Bollinger Bands: {e}", exc_info=True)
+        send_alert(
+            "Bollinger Bands Calculation Failure",
+            f"Error calculating Bollinger Bands: {e}",
+        )
         return None, None, None
 
 
@@ -149,9 +147,7 @@ def sell_asset(
 
         try:
             logger.debug(f"Starting sell process for {symbol}: {reason}")
-            sale_value = (
-                asset["quantity"] * current_price * (1 - abs(sell_slippage))
-            )  # Use absolute value for calculation
+            sale_value = asset["quantity"] * current_price * (1 - abs(sell_slippage))
             sell_fee = sale_value * config.config.SELL_FEE
             net_sale_value = sale_value - sell_fee
             buy_value = asset["quantity"] * asset["purchase_price"]
@@ -167,7 +163,7 @@ def sell_asset(
                 "Sell Price": f"{current_price * (1 - abs(sell_slippage)):.10f}",
                 "Sell Time": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
                 "Sell Fee": f"{sell_fee:.2f}",
-                "Sell Slippage": f"{sell_slippage:.2f}%",  # Log original sign
+                "Sell Slippage": f"{sell_slippage:.2f}%",
                 "Profit/Loss": f"{profit_loss:.2f}",
                 "Reason": reason,
             }
@@ -176,7 +172,7 @@ def sell_asset(
             logger.debug(f"Created finished trade record for {symbol}")
             logger.info(
                 f"Sold {asset['quantity']:.10f} {symbol} at {current_price * (1 - abs(sell_slippage)):.8f} EUR "
-                f"(after {sell_slippage:.2f}% slippage and {sell_fee:.2f} fee) for {asset['quantity'] * (current_price * (1 - abs(sell_slippage))):.2f} € . Reason: {reason}"
+                f"(after {sell_slippage:.2f}% slippage and {sell_fee:.2f} fee) for {asset['quantity'] * (current_price * (1 - abs(sell_slippage))):.2f} €. Reason: {reason}"
             )
             del portfolio["assets"][symbol]
             low_volatility_assets.discard(symbol)
@@ -194,7 +190,6 @@ def sell_asset(
                     f"Price monitor manager is None for {symbol}. Cannot stop monitoring."
                 )
             append_to_finished_trades_csv(finished_trade)
-            telegram_notifier.notify_sell_trade(finished_trade)
         except Exception as e:
             logger.error(
                 f"Failed to process post-sale actions for {symbol}: {e}", exc_info=True
@@ -348,6 +343,7 @@ def sell_most_profitable_asset(
 def save_portfolio():
     """
     Saves the current portfolio state to a JSON file and maintains only the 3 latest backup files atomically.
+    In GitHub Actions, skips backup file creation to reduce disk usage.
 
     Raises:
         ValueError: If portfolio data is invalid.
@@ -389,32 +385,40 @@ def save_portfolio():
                 temp_file.flush()
                 os.fsync(temp_file.fileno())
             shutil.move(temp_file.name, file_path)
-            # logger.info(f"Saved portfolio to {file_path}")
+            logger.info(f"Saved portfolio to {file_path}")
 
-            # Save to backup file
-            backup_file = (
-                f"{file_path}.backup_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}"
-            )
-            with tempfile.NamedTemporaryFile(
-                mode="w", delete=False, suffix=".json"
-            ) as temp_file:
-                json.dump(portfolio_copy, temp_file, indent=4)
-                temp_file.flush()
-                os.fsync(temp_file.fileno())
-            shutil.move(temp_file.name, backup_file)
-            # logger.info(f"Saved portfolio backup to {backup_file}")
+            # Save to backup file, but skip in GitHub Actions to reduce disk usage
+            if not IS_GITHUB_ACTIONS:
+                backup_file = (
+                    f"{file_path}.backup_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}"
+                )
+                with tempfile.NamedTemporaryFile(
+                    mode="w", delete=False, suffix=".json"
+                ) as temp_file:
+                    json.dump(portfolio_copy, temp_file, indent=4)
+                    temp_file.flush()
+                    os.fsync(temp_file.fileno())
+                shutil.move(temp_file.name, backup_file)
+                logger.info(f"Saved portfolio backup to {backup_file}")
 
-            # Manage backup files: keep only the 3 latest
-            backup_files = glob.glob(f"{file_path}.backup_*")
-            backup_files.sort(key=lambda x: x.split("backup_")[-1], reverse=True)
-            for old_file in backup_files[3:]:
-                try:
-                    os.remove(old_file)
-                    logger.debug(f"Deleted old backup file: {old_file}")
-                except OSError as e:
-                    logger.warning(
-                        f"Error deleting old backup file {old_file}: {e}", exc_info=True
-                    )
+                # Manage backup files: keep only the 3 latest
+                backup_files = glob.glob(f"{file_path}.backup_*")
+                backup_files.sort(key=lambda x: x.split("backup_")[-1], reverse=True)
+                for old_file in backup_files[3:]:
+                    try:
+                        os.remove(old_file)
+                        logger.debug(f"Deleted old backup file: {old_file}")
+                    except OSError as e:
+                        logger.warning(
+                            f"Error deleting old backup file {old_file}: {e}",
+                            exc_info=True,
+                        )
+
+            # In GitHub Actions, log file creation for artifact tracking
+            if IS_GITHUB_ACTIONS:
+                logger.info(
+                    f"Portfolio file saved at {file_path} for artifact collection"
+                )
         finally:
             portfolio_lock.release()
     except ValueError as e:
@@ -503,24 +507,20 @@ def manage_portfolio(
                         "error" not in metrics
                         and metrics.get("slippage_sell") is not None
                     ):
-                        sell_slippages[symbol] = metrics[
-                            "slippage_sell"
-                        ]  # Negative percentage (e.g., -0.1 for -0.1%)
+                        sell_slippages[symbol] = metrics["slippage_sell"]
                     else:
                         logger.warning(
                             f"Could not calculate sell slippage for {symbol}. Using default value."
                         )
                         sell_slippages[symbol] = -(
                             config.config.MAX_SLIPPAGE_SELL + 0.1
-                        )  # Negative to prevent selling
+                        )
                 except Exception as e:
                     logger.error(
                         f"Error calculating sell slippage for {symbol}: {e}",
                         exc_info=True,
                     )
-                    sell_slippages[symbol] = -(
-                        config.config.MAX_SLIPPAGE_SELL + 0.1
-                    )  # Negative to prevent selling
+                    sell_slippages[symbol] = -(config.config.MAX_SLIPPAGE_SELL + 0.1)
 
         if not portfolio_lock.acquire(timeout=5):
             logger.error("Timeout acquiring portfolio lock")
@@ -693,9 +693,7 @@ def manage_portfolio(
                     )
                 else:
                     negative_momentum_counts[symbol] = 0
-                buy_fee = asset.get(
-                    "buy_fee", 0
-                )  # Get buy fee, default to 0 if not present
+                buy_fee = asset.get("buy_fee", 0)
                 total_cost = purchase_price * asset["quantity"] + buy_fee
                 unrealized_profit = (
                     ((current_price * asset["quantity"]) - total_cost) / total_cost
@@ -799,7 +797,6 @@ def manage_portfolio(
                         logger.info(
                             f"Delaying sell for {symbol}: Sell slippage {sell_slippage:.2f}% exceeds threshold {config.config.MAX_SLIPPAGE_SELL:.2f}%"
                         )
-                    # Log asset statistics including sell slippage
                     logger.info(
                         f"Asset: {symbol}, "
                         f"Current: {current_price:.4f}, "
@@ -1004,7 +1001,6 @@ def manage_portfolio(
                         "RSI": f"{rsi:.2f}" if rsi is not None else "N/A",
                     }
                     append_to_buy_trades_csv(buy_trade_data)
-                    telegram_notifier.notify_buy_trade(buy_trade_data)
                     portfolio["assets"][symbol] = {
                         "quantity": quantity,
                         "purchase_price": purchase_price,
@@ -1023,12 +1019,10 @@ def manage_portfolio(
                     logger.info(
                         f"Bought {quantity:.4f} {symbol} at {purchase_price:.4f} EUR (close {close_price:.4f}) "
                         f"for {actual_cost:.2f} EUR (after {slippage_buy:.2f}% slippage and {buy_fee:.2f} fee), "
-                        f"Trade Count: {trade_count}, Largest Trade Volume DEPARTED: €{largest_trade_volume_eur:.2f}, "
+                        f"Trade Count: {trade_count}, Largest Trade Volume EUR: €{largest_trade_volume_eur:.2f}, "
                         f"RSI: {rsi:.2f}"
                         if rsi is not None
-                        else f"Bought {quantity:.4f} {symbol} at {purchase_price:.4f} EUR (close {close_price:.4f}) "
-                        f"for {actual_cost:.2f} EUR (after {slippage_buy:.2f}% slippage and {buy_fee:.2f} fee), "
-                        f"Trade Count: {trade_count}, Largest Trade Volume: €{largest_trade_volume_eur:.2f}"
+                        else ""
                     )
                     for metrics in order_book_metrics_list:
                         if metrics.get("market") == symbol.replace("/", "-"):
@@ -1105,8 +1099,11 @@ def manage_portfolio(
 
     # Save order book metrics to CSV
     try:
-        if order_book_metrics_list:
-            append_to_order_book_metrics_csv(order_book_metrics_list)
+        if IS_GITHUB_ACTIONS:
+            logger.info("Skip saving order book metrics.")
+        else:
+            if order_book_metrics_list:
+                append_to_order_book_metrics_csv(order_book_metrics_list)
     except Exception as e:
         logger.error(f"Error saving order book metrics: {e}", exc_info=True)
         send_alert(
@@ -1124,63 +1121,17 @@ def manage_portfolio(
         logger.warning(
             f"Portfolio value may be inaccurate due to missing prices for: {', '.join(skipped_assets)}"
         )
-    # logger.info(
-    #     f"Portfolio: Cash: {portfolio.get('cash', 0):.2f} EUR, Assets: {len(portfolio.get('assets', {}))}, Total Value: {total_portfolio_value:.2f} EUR"
-    # )
-    # Add these notification calls here
-    if (
-        not hasattr(telegram_notifier, "last_summary_time")
-        or (datetime.utcnow() - telegram_notifier.last_summary_time).total_seconds()
-        >= 3600
-    ):
-        telegram_notifier.notify_portfolio_summary(portfolio)
-        telegram_notifier.last_summary_time = datetime.utcnow()
-
-    if (
-        datetime.utcnow()
-        - getattr(telegram_notifier, "last_pinned_time", datetime.utcnow())
-    ).total_seconds() >= 60:
-        asyncio.run_coroutine_threadsafe(
-            telegram_notifier.update_pinned_summary(portfolio), asyncio.get_event_loop()
-        )
-        telegram_notifier.last_pinned_time = datetime.utcnow()
-
-    if (
-        datetime.utcnow()
-        - getattr(telegram_notifier, "last_chart_time", datetime.utcnow())
-    ).total_seconds() >= 86400:
-        asyncio.run_coroutine_threadsafe(
-            telegram_notifier.notify_performance_chart(portfolio_values),
-            asyncio.get_event_loop(),
-        )
-        telegram_notifier.last_chart_time = datetime.utcnow()
-
-    if (
-        datetime.utcnow()
-        - getattr(telegram_notifier, "last_allocation_time", datetime.utcnow())
-    ).total_seconds() >= 86400:
-        asyncio.run_coroutine_threadsafe(
-            telegram_notifier.notify_asset_allocation(portfolio),
-            asyncio.get_event_loop(),
-        )
-        telegram_notifier.last_allocation_time = datetime.utcnow()
-
-    if datetime.utcnow().hour == 0 and (
-        not hasattr(telegram_notifier, "last_report_date")
-        or datetime.utcnow().date() != telegram_notifier.last_report_date
-    ):
-        asyncio.run_coroutine_threadsafe(
-            telegram_notifier.notify_daily_report(), asyncio.get_event_loop()
-        )
-        telegram_notifier.last_report_date = datetime.utcnow().date()
+    logger.info(
+        f"Portfolio: Cash: {portfolio.get('cash', 0):.2f} EUR, Assets: {len(portfolio.get('assets', {}))}, Total Value: {total_portfolio_value:.2f} EUR"
+    )
 
 
 def send_alert(subject, message):
     """
-    Sends an alert for critical errors.
+    Sends an alert for critical errors using TelegramNotifier.
 
     Args:
         subject (str): The subject of the alert.
         message (str): The alert message.
     """
-    telegram_notifier.notify_error(subject, message)
+    logger.error(message)

@@ -8,7 +8,7 @@ import pandas as pd
 from ccxt.base.errors import PermissionDenied
 
 from . import config
-from .config import logger
+from .config import IS_GITHUB_ACTIONS, logger
 from .exchange import (bitvavo, check_rate_limit, handle_ban_error, semaphore,
                        wait_until_ban_lifted)
 from .portfolio import sell_asset
@@ -28,16 +28,30 @@ class PriceMonitorManager:
         self.ticker_errors = {}
 
     def adjust_concurrency(self, max_threads):
+        """
+        Adjusts the number of active monitoring threads to the specified limit.
+
+        Args:
+            max_threads (int): Maximum number of concurrent threads allowed.
+        """
         with threading.Lock():
-            config.config.CONCURRENT_REQUESTS = max_threads
+            # Use environment-specific concurrency limit
+            effective_max_threads = (
+                min(max_threads, config.config.CONCURRENT_REQUESTS)
+                if IS_GITHUB_ACTIONS
+                else max_threads
+            )
+            config.config.CONCURRENT_REQUESTS = effective_max_threads
             current_threads = len(self.threads)
-            if current_threads > max_threads:
+            if current_threads > effective_max_threads:
                 threads_to_stop = sorted(
                     self.threads.items(), key=lambda x: self.last_update.get(x[0], 0)
-                )[: current_threads - max_threads]
+                )[: current_threads - effective_max_threads]
                 for symbol, _ in threads_to_stop:
                     self.stop(symbol)
-                logger.info(f"Reduced active monitoring threads to {max_threads}")
+                logger.info(
+                    f"Reduced active monitoring threads to {effective_max_threads}"
+                )
 
     def handle_ticker(self, symbol, portfolio, portfolio_lock, candles_df):
         """
@@ -55,7 +69,7 @@ class PriceMonitorManager:
         self.last_update[symbol] = time.time()
         try:
             logger.info(f"Started price monitoring for {symbol}")
-            while self.running.get(symbol, False):  # Check running flag
+            while self.running.get(symbol, False):
                 if is_banned and time.time() < ban_expiry_time:
                     logger.warning(
                         f"API banned until {datetime.utcfromtimestamp(ban_expiry_time)}. Pausing {symbol}."
@@ -90,7 +104,7 @@ class PriceMonitorManager:
                         current_second = current_time.replace(microsecond=0)
                         self.last_update[symbol] = time.time()
                         # Minimize lock scope
-                        if self.running.get(symbol, False):  # Re-check before lock
+                        if self.running.get(symbol, False):
                             with portfolio_lock:
                                 if symbol in portfolio["assets"]:
                                     portfolio["assets"][symbol]["current_price"] = price
@@ -142,11 +156,16 @@ class PriceMonitorManager:
                                 low_volatility_assets.add(symbol)
                             self.stop(symbol)
                             break
-                        time.sleep(1)
+                        # Adjust sleep time for GitHub Actions to reduce CPU usage
+                        time.sleep(2 if IS_GITHUB_ACTIONS else 1)
                 except PermissionDenied as e:
                     ban_expiry = handle_ban_error(e)
                     if ban_expiry:
                         wait_until_ban_lifted(ban_expiry)
+                        self.telegram_notifier.notify_error(
+                            "API Ban Detected",
+                            f"API banned for {symbol} until {datetime.utcfromtimestamp(ban_expiry)}.",
+                        )
                         continue
                     logger.error(f"Permission denied for {symbol}: {e}")
                     self.ticker_errors[symbol] = self.ticker_errors.get(symbol, 0) + 1
@@ -154,19 +173,30 @@ class PriceMonitorManager:
                         with portfolio_lock:
                             low_volatility_assets.add(symbol)
                         self.stop(symbol)
+                        self.telegram_notifier.notify_error(
+                            "Monitoring Stopped",
+                            f"Stopped monitoring {symbol} due to repeated ticker errors.",
+                        )
                         break
                     time.sleep(0.1)
                 except Exception as e:
-                    logger.error(f"Ticker error for {symbol}: {e}")
+                    logger.error(f"Ticker error for {symbol}: {e}", exc_info=True)
                     self.ticker_errors[symbol] = self.ticker_errors.get(symbol, 0) + 1
                     if self.ticker_errors[symbol] >= 3:
                         with portfolio_lock:
                             low_volatility_assets.add(symbol)
                         self.stop(symbol)
+                        self.telegram_notifier.notify_error(
+                            "Monitoring Stopped",
+                            f"Stopped monitoring {symbol} due to repeated ticker errors: {e}",
+                        )
                         break
                     time.sleep(0.1)
         except Exception as e:
             logger.error(f"Price monitoring error for {symbol}: {e}", exc_info=True)
+            self.telegram_notifier.notify_error(
+                "Price Monitoring Failure", f"Error monitoring {symbol}: {e}"
+            )
         finally:
             logger.info(f"Stopped price monitoring for {symbol}")
 
@@ -338,6 +368,7 @@ class PriceMonitorManager:
                     from .utils import append_to_finished_trades_csv
 
                     append_to_finished_trades_csv(finished_trade)
+                    self.telegram_notifier.notify_sell_trade(finished_trade)
 
     def start(self, symbol, portfolio, portfolio_lock, candles_df):
         """
@@ -352,9 +383,10 @@ class PriceMonitorManager:
         if symbol not in self.threads and symbol not in low_volatility_assets:
             with threading.Lock():
                 global weight_used
-                if len(self.threads) >= config.config.CONCURRENT_REQUESTS:
+                max_threads = config.config.CONCURRENT_REQUESTS
+                if len(self.threads) >= max_threads:
                     logger.warning(
-                        f"Max threads ({config.config.CONCURRENT_REQUESTS}) reached. Cannot start monitoring for {symbol}."
+                        f"Max threads ({max_threads}) reached. Cannot start monitoring for {symbol}."
                     )
                     return
                 if weight_used + 2 > config.config.RATE_LIMIT_WEIGHT * 0.8:
@@ -403,6 +435,10 @@ class PriceMonitorManager:
             except Exception as e:
                 logger.error(
                     f"Error stopping price monitor for {symbol}: {e}", exc_info=True
+                )
+                self.telegram_notifier.notify_error(
+                    "Stop Monitor Failure",
+                    f"Error stopping price monitor for {symbol}: {e}",
                 )
             finally:
                 self.threads.pop(symbol, None)

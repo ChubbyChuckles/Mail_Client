@@ -1,4 +1,5 @@
-# main.py
+# trading_bot/src/main.py
+import asyncio
 import os
 import sys
 import threading
@@ -14,29 +15,27 @@ from tenacity import (retry, retry_if_exception_type, stop_after_attempt,
 
 from . import config
 from .clean_up import garbage_collection
-from .config import logger
+from .config import IS_GITHUB_ACTIONS, logger
 from .data_processor import colorize_value, verify_and_analyze_data
 from .exchange import bitvavo, check_rate_limit, fetch_klines
 from .portfolio import manage_portfolio, save_portfolio
 from .price_monitor import PriceMonitorManager
 from .print_assets import print_portfolio
 from .print_trade_variables import print_trade_variables
+from .send_portfolio import (send_portfolio, send_shutdown_message,
+                             send_startup_message)
 from .state import (ban_expiry_time, is_banned, low_volatility_assets,
                     portfolio, portfolio_lock)
 from .storage import save_to_local
 
 last_cycle_time = time.time()
 GREEN = "\033[32m"
+BRIGHT_BLUE = "\033[94m"
+YELLOW = "\033[33m"
 RESET = "\033[0m"
-
-import asyncio
-
-from .telegram_notifications import TelegramNotifier
-
-telegram_notifier = TelegramNotifier(
-    bot_token=config.config.TELEGRAM_BOT_TOKEN, chat_id=config.config.TELEGRAM_CHAT_ID
-)
-asyncio.run_coroutine_threadsafe(telegram_notifier.start(), asyncio.get_event_loop())
+CYCLES = 0
+# Define runtime limit for GitHub Actions (4 hours and 15 minutes = 15300 seconds)
+RUNTIME_LIMIT_SECONDS = 15300 if IS_GITHUB_ACTIONS else float("inf")
 
 
 def watchdog(price_monitor_manager):
@@ -59,6 +58,7 @@ def watchdog(price_monitor_manager):
                     time.sleep(min(ban_expiry_time - current_time, 60))
                 else:
                     logger.error("Main loop hung without ban. Attempting recovery...")
+
             time.sleep(10)
         except Exception as e:
             logger.error(f"Watchdog error: {e}", exc_info=True)
@@ -67,7 +67,12 @@ def watchdog(price_monitor_manager):
 
 def center_text(text, total_width=256):
     try:
-        clean_text = text.replace(GREEN, "").replace(RESET, "")
+        clean_text = (
+            text.replace(GREEN, "")
+            .replace(RESET, "")
+            .replace(BRIGHT_BLUE, "")
+            .replace(YELLOW, "")
+        )
         text_length = len(clean_text)
         padding = (total_width - text_length) // 2
         left_padding = " " * padding
@@ -92,7 +97,9 @@ def load_markets_with_retry():
 
 
 def main():
+    global CYCLES
     price_monitor_manager = PriceMonitorManager()
+    start_time = time.time()
     try:
         watchdog_thread = threading.Thread(
             target=watchdog, args=(price_monitor_manager,), daemon=True
@@ -100,11 +107,6 @@ def main():
         watchdog_thread.start()
     except Exception as e:
         logger.error(f"Error starting watchdog thread: {e}", exc_info=True)
-        send_alert("Watchdog Failure", f"Failed to start watchdog: {e}")
-
-    BRIGHT_BLUE = "\033[94m"
-    YELLOW = "\033[33m"
-    RESET = "\033[0m"
 
     try:
         logger.info(f"{GREEN}{'=' * 256}{RESET}")
@@ -118,6 +120,7 @@ def main():
 
         try:
             garbage_collection()
+            send_startup_message()
         except Exception as e:
             logger.error(f"Error in garbage collection: {e}", exc_info=True)
 
@@ -135,13 +138,18 @@ def main():
         except (ccxt.NetworkError, ccxt.RequestTimeout) as e:
             logger.error(f"Error loading markets: {e}", exc_info=True)
             eur_pairs = []
-            send_alert("Market Load Failure", f"Failed to load markets: {e}")
         except Exception as e:
             logger.error(f"Unexpected error loading markets: {e}", exc_info=True)
             eur_pairs = []
-            send_alert("Market Load Failure", f"Unexpected error loading markets: {e}")
 
         while True:
+            # Check runtime limit for GitHub Actions
+            if IS_GITHUB_ACTIONS and time.time() - start_time >= RUNTIME_LIMIT_SECONDS:
+                logger.info(
+                    "Reached 4-hour 3-minute runtime limit in GitHub Actions. Initiating shutdown..."
+                )
+                break
+
             try:
                 config.reload_config()
             except Exception as e:
@@ -173,13 +181,9 @@ def main():
             except (ccxt.NetworkError, ccxt.RequestTimeout) as e:
                 logger.error(f"Error fetching tickers: {e}", exc_info=True)
                 symbols = eur_pairs[:300]
-                send_alert("Ticker Fetch Failure", f"Failed to fetch tickers: {e}")
             except Exception as e:
                 logger.error(f"Unexpected error fetching tickers: {e}", exc_info=True)
                 symbols = eur_pairs[:300]
-                send_alert(
-                    "Ticker Fetch Failure", f"Unexpected error fetching tickers: {e}"
-                )
 
             logger.info(f"Processing {GREEN}{len(symbols)}{RESET} EUR symbols")
 
@@ -223,7 +227,6 @@ def main():
                             )
             except Exception as e:
                 logger.error(f"Error in ThreadPoolExecutor: {e}", exc_info=True)
-                send_alert("Executor Failure", f"ThreadPoolExecutor error: {e}")
 
             if all_data:
                 try:
@@ -240,7 +243,10 @@ def main():
                         f"{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}_"
                         f"{config.config.PARQUET_FILENAME}"
                     )
-                    save_to_local(combined_df, output_path)
+                    if IS_GITHUB_ACTIONS:
+                        logger.info("Skip saving parquet file.")
+                    else:
+                        save_to_local(combined_df, output_path)
                 except pd.errors.EmptyDataError as e:
                     logger.error(f"Error concatenating data: {e}", exc_info=True)
                     continue
@@ -264,25 +270,24 @@ def main():
                         percent_changes,
                         price_monitor_manager,
                         order_book_metrics_list,
-                        combined_df=combined_df,  # Add this argument
+                        combined_df=combined_df,
                     )
                 except Exception as e:
                     logger.error(f"Error managing portfolio: {e}", exc_info=True)
 
                 try:
                     save_portfolio()
+                    CYCLES += 1
+
+                    if CYCLES > 60:
+                        CYCLES = 0
+                        send_portfolio()  # Send portfolio update after saving
                 except Exception as e:
                     logger.error(f"Error saving portfolio: {e}", exc_info=True)
-                    send_alert(
-                        "Portfolio Save Failure", f"Failed to save portfolio: {e}"
-                    )
 
                 try:
                     if not portfolio_lock.acquire(timeout=5):
                         logger.error("Timeout acquiring portfolio lock")
-                        send_alert(
-                            "Portfolio Lock Failure", "Failed to acquire portfolio lock"
-                        )
                         continue
                     try:
                         total_value = portfolio["cash"] + sum(
@@ -302,11 +307,14 @@ def main():
                     )
 
                 try:
-                    if not os.path.exists("portfolio.json"):
+                    portfolio_path = (
+                        "/tmp/portfolio.json" if IS_GITHUB_ACTIONS else "portfolio.json"
+                    )
+                    if not os.path.exists(portfolio_path):
                         raise FileNotFoundError(
-                            "Portfolio file 'portfolio.json' does not exist"
+                            f"Portfolio file '{portfolio_path}' does not exist"
                         )
-                    print_portfolio("portfolio.json")
+                    print_portfolio(portfolio_path)
                 except FileNotFoundError as e:
                     logger.error(f"Portfolio file error: {e}", exc_info=True)
                 except Exception as e:
@@ -320,10 +328,6 @@ def main():
                 if not portfolio_lock.acquire(timeout=5):
                     logger.error(
                         "Timeout acquiring portfolio lock for monitor management"
-                    )
-                    send_alert(
-                        "Monitor Lock Failure",
-                        "Failed to acquire lock for monitor management",
                     )
                     continue
                 try:
@@ -363,7 +367,6 @@ def main():
                 save_state()
             except Exception as e:
                 logger.error(f"Error saving state: {e}", exc_info=True)
-                send_alert("State Save Failure", f"Failed to save state: {e}")
 
             elapsed_time = time.time() - last_cycle_time
             sleep_time = max(0, config.config.LOOP_INTERVAL_SECONDS - elapsed_time)
@@ -381,40 +384,40 @@ def main():
 
     except KeyboardInterrupt:
         logger.info("Received shutdown signal. Initiating graceful shutdown...")
-        try:
-            asyncio.run_coroutine_threadsafe(
-                telegram_notifier.stop(), asyncio.get_event_loop()
-            )
-        except Exception as e:
-            logger.error(
-                f"Error stopping Telegram notifier during shutdown: {e}", exc_info=True
-            )
-        try:
-            price_monitor_manager.stop_all()
-        except Exception as e:
-            logger.error(
-                f"Error stopping price monitors during shutdown: {e}", exc_info=True
-            )
-        try:
-            save_portfolio()
-        except Exception as e:
-            logger.error(f"Error saving portfolio during shutdown: {e}", exc_info=True)
-        try:
-            from .state import save_state
-
-            save_state()
-        except Exception as e:
-            logger.error(f"Error saving state during shutdown: {e}", exc_info=True)
-        logger.info("Bot stopped successfully.")
-        sys.exit(0)
+        perform_shutdown(price_monitor_manager)
     except Exception as e:
         logger.error(f"Critical error in main loop: {e}", exc_info=True)
-        send_alert("Critical Failure", f"Main loop crashed: {e}")
-        time.sleep(60)
+        perform_shutdown(price_monitor_manager)
+        sys.exit(1)
+
+
+def perform_shutdown(price_monitor_manager):
+    """Handles graceful shutdown of the bot."""
+
+    try:
+        price_monitor_manager.stop_all()
+    except Exception as e:
+        logger.error(
+            f"Error stopping price monitors during shutdown: {e}", exc_info=True
+        )
+    try:
+        save_portfolio()
+        send_shutdown_message()
+    except Exception as e:
+        logger.error(f"Error saving portfolio during shutdown: {e}", exc_info=True)
+    try:
+        from .state import save_state
+
+        save_state()
+    except Exception as e:
+        logger.error(f"Error saving state during shutdown: {e}", exc_info=True)
+    logger.info("Bot stopped successfully.")
+    if IS_GITHUB_ACTIONS:
+        sys.exit(0)
 
 
 def send_alert(subject, message):
-    telegram_notifier.notify_error(subject, message)
+    logger.info(message)
 
 
 if __name__ == "__main__":

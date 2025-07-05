@@ -1,16 +1,18 @@
-from python_bitvavo_api.bitvavo import Bitvavo
-from dotenv import load_dotenv
-import os
-from datetime import datetime
-import time
-import requests
-import hmac
 import hashlib
+import hmac
 import json
+import os
+import time
+from datetime import datetime
+
+import requests
+from dotenv import load_dotenv
+from python_bitvavo_api.bitvavo import Bitvavo
 
 # Configuration
 SYMBOL = "BTC-EUR"  # Trading pair (e.g., "BTC-EUR", "ETH-EUR")
 LIMIT = 1000  # Max orders per request (API limit)
+
 
 def fetch_filled_orders():
     try:
@@ -30,10 +32,7 @@ def fetch_filled_orders():
         api_secret = api_secret.strip()
 
         # Initialize Bitvavo client
-        bitvavo = Bitvavo({
-            'APIKEY': api_key,
-            'APISECRET': api_secret
-        })
+        bitvavo = Bitvavo({"APIKEY": api_key, "APISECRET": api_secret})
 
         # Test public endpoint to verify library
         try:
@@ -42,7 +41,9 @@ def fetch_filled_orders():
                 raise Exception(f"Invalid market: {SYMBOL}")
         except Exception as e:
             print(f"Public endpoint test failed: {str(e)}")
-            raise Exception("Failed to verify market. Check library installation or network.")
+            raise Exception(
+                "Failed to verify market. Check library installation or network."
+            )
 
         # Initialize variables for pagination
         all_filled_orders = []
@@ -61,7 +62,9 @@ def fetch_filled_orders():
 
             # Check for error response
             if isinstance(orders, dict) and "errorCode" in orders:
-                raise Exception(f"API error: {orders.get('errorCode', 'Unknown')}: {orders.get('error', 'No details provided')}")
+                raise Exception(
+                    f"API error: {orders.get('errorCode', 'Unknown')}: {orders.get('error', 'No details provided')}"
+                )
 
             # Validate response
             if not isinstance(orders, list):
@@ -69,7 +72,11 @@ def fetch_filled_orders():
                 raise Exception("API response is not a list.")
 
             # Filter filled orders
-            filled_orders = [order for order in orders if isinstance(order, dict) and order.get("status") == "filled"]
+            filled_orders = [
+                order
+                for order in orders
+                if isinstance(order, dict) and order.get("status") == "filled"
+            ]
 
             if not filled_orders:
                 print("No more filled orders found in this batch.")
@@ -80,7 +87,9 @@ def fetch_filled_orders():
             # Check for pagination
             if len(orders) < LIMIT:
                 break  # No more orders to fetch
-            order_id_from = orders[-1].get("orderId")  # Use last order ID for next batch
+            order_id_from = orders[-1].get(
+                "orderId"
+            )  # Use last order ID for next batch
 
         if not all_filled_orders:
             print(f"No filled orders found for {SYMBOL}.")
@@ -96,8 +105,13 @@ def fetch_filled_orders():
             amount = float(order.get("filledAmount", 0))
             price = float(order.get("price", 0)) if order.get("price") else "N/A"
             filled_timestamp = int(order.get("printing", 0))
-            filled_time = (datetime.fromtimestamp(filled_timestamp / 1000)
-                          .strftime("%Y-%m-%d %H:%M:%S") if filled_timestamp else "N/A")
+            filled_time = (
+                datetime.fromtimestamp(filled_timestamp / 1000).strftime(
+                    "%Y-%m-%d %H:%M:%S"
+                )
+                if filled_timestamp
+                else "N/A"
+            )
             fee = float(order.get("feePaid", 0))
             fee_currency = order.get("feeCurrency", "N/A")
 
@@ -105,7 +119,11 @@ def fetch_filled_orders():
             print(f"Side: {side.capitalize()}")
             print(f"Type: {order_type.capitalize()}")
             print(f"Amount: {amount:.8f} {SYMBOL.split('-')[0]}")
-            print(f"Price: {price:.2f} EUR" if price != "N/A" else "Price: N/A (Market Order)")
+            print(
+                f"Price: {price:.2f} EUR"
+                if price != "N/A"
+                else "Price: N/A (Market Order)"
+            )
             print(f"Fee: {fee:.8f} {fee_currency}")
             print(f"Filled Time: {filled_time}")
             print("-" * 60)
@@ -115,16 +133,29 @@ def fetch_filled_orders():
     except Exception as e:
         print(f"An error occurred: {str(e)}")
         if "309" in str(e) or "403" in str(e):
-            print("Signature or permission error detected. Attempting manual request...")
+            print(
+                "Signature or permission error detected. Attempting manual request..."
+            )
             try_manual_request(api_key, api_secret)
         else:
             print("Debugging tips:")
-            print("- Verify .env file exists and contains valid BITVAVO_API_KEY and BITVAVO_API_SECRET.")
-            print("- Ensure API key is activated via email and has 'View' or 'Trade' permissions.")
-            print("- Synchronize system clock (e.g., `sudo ntpdate pool.ntp.org` on Linux/Mac, or 'Sync now' on Windows).")
-            print("- Update python-bitvavo-api: `pip install --upgrade python-bitvavo-api`")
+            print(
+                "- Verify .env file exists and contains valid BITVAVO_API_KEY and BITVAVO_API_SECRET."
+            )
+            print(
+                "- Ensure API key is activated via email and has 'View' or 'Trade' permissions."
+            )
+            print(
+                "- Synchronize system clock (e.g., `sudo ntpdate pool.ntp.org` on Linux/Mac, or 'Sync now' on Windows)."
+            )
+            print(
+                "- Update python-bitvavo-api: `pip install --upgrade python-bitvavo-api`"
+            )
             print("- Check Bitvavo API status: https://status.bitvavo.com/")
-            print("- Test with a public endpoint (e.g., bitvavo.markets()) to rule out credential issues.")
+            print(
+                "- Test with a public endpoint (e.g., bitvavo.markets()) to rule out credential issues."
+            )
+
 
 def try_manual_request(api_key, api_secret):
     try:
@@ -135,16 +166,14 @@ def try_manual_request(api_key, api_secret):
         # Correct signature format per Bitvavo API documentation
         string_to_sign = f"{timestamp}GET/v2/orders?{query_params}"
         signature = hmac.new(
-            api_secret.encode('utf-8'),
-            string_to_sign.encode('utf-8'),
-            hashlib.sha256
+            api_secret.encode("utf-8"), string_to_sign.encode("utf-8"), hashlib.sha256
         ).hexdigest()
 
         headers = {
             "Bitvavo-Access-Key": api_key,
             "Bitvavo-Access-Signature": signature,
             "Bitvavo-Access-Timestamp": timestamp,
-            "Content-Type": "application/json"
+            "Content-Type": "application/json",
         }
 
         response = requests.get(f"{url}?{query_params}", headers=headers)
@@ -152,7 +181,9 @@ def try_manual_request(api_key, api_secret):
         orders = response.json()
 
         if isinstance(orders, dict) and "errorCode" in orders:
-            raise Exception(f"Manual API error: {orders.get('errorCode', 'Unknown')}: {orders.get('error', 'No details provided')}")
+            raise Exception(
+                f"Manual API error: {orders.get('errorCode', 'Unknown')}: {orders.get('error', 'No details provided')}"
+            )
 
         filled_orders = [order for order in orders if order.get("status") == "filled"]
 
@@ -169,8 +200,13 @@ def try_manual_request(api_key, api_secret):
             amount = float(order.get("filledAmount", 0))
             price = float(order.get("price", 0)) if order.get("price") else "N/A"
             filled_timestamp = int(order.get("updated", 0))
-            filled_time = (datetime.fromtimestamp(filled_timestamp / 1000)
-                          .strftime("%Y-%m-%d %H:%M:%S") if filled_timestamp else "N/A")
+            filled_time = (
+                datetime.fromtimestamp(filled_timestamp / 1000).strftime(
+                    "%Y-%m-%d %H:%M:%S"
+                )
+                if filled_timestamp
+                else "N/A"
+            )
             fee = float(order.get("feePaid", 0))
             fee_currency = order.get("feeCurrency", "N/A")
 
@@ -178,7 +214,11 @@ def try_manual_request(api_key, api_secret):
             print(f"Side: {side.capitalize()}")
             print(f"Type: {order_type.capitalize()}")
             print(f"Amount: {amount:.8f} {SYMBOL.split('-')[0]}")
-            print(f"Price: {price:.2f} EUR" if price != "N/A" else "Price: N/A (Market Order)")
+            print(
+                f"Price: {price:.2f} EUR"
+                if price != "N/A"
+                else "Price: N/A (Market Order)"
+            )
             print(f"Fee: {fee:.8f} {fee_currency}")
             print(f"Filled Time: {filled_time}")
             print("-" * 60)
@@ -194,6 +234,7 @@ def try_manual_request(api_key, api_secret):
         print("- Verify no IP restrictions are set on the API key.")
         print("- Check Bitvavo API status: https://status.bitvavo.com/")
         print("- Contact Bitvavo support if the issue persists.")
+
 
 if __name__ == "__main__":
     fetch_filled_orders()
