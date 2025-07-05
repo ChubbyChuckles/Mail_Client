@@ -1109,8 +1109,11 @@ def manage_portfolio(
 
     # Save order book metrics to CSV
     try:
-        if order_book_metrics_list:
-            append_to_order_book_metrics_csv(order_book_metrics_list)
+        if IS_GITHUB_ACTIONS:
+            logger.info("Skip saving order book metrics.")
+        else:
+            if order_book_metrics_list:
+                append_to_order_book_metrics_csv(order_book_metrics_list)
     except Exception as e:
         logger.error(f"Error saving order book metrics: {e}", exc_info=True)
         send_alert(

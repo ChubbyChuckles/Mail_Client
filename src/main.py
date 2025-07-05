@@ -40,7 +40,7 @@ YELLOW = "\033[33m"
 RESET = "\033[0m"
 
 # Define runtime limit for GitHub Actions (4 hours and 3 minutes = 14580 seconds)
-RUNTIME_LIMIT_SECONDS = 14580 if IS_GITHUB_ACTIONS else float("inf")
+RUNTIME_LIMIT_SECONDS = 14760 if IS_GITHUB_ACTIONS else float("inf")
 
 def watchdog(price_monitor_manager):
     global last_cycle_time
