@@ -388,9 +388,7 @@ class PriceMonitorManager:
             with threading.Lock():
                 global weight_used
                 max_threads = (
-                    config.config.CONCURRENT_REQUESTS_GITHUB
-                    if IS_GITHUB_ACTIONS
-                    else config.config.CONCURRENT_REQUESTS
+                    config.config.CONCURRENT_REQUESTS
                 )
                 if len(self.threads) >= max_threads:
                     logger.warning(
