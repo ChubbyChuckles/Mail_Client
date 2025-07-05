@@ -112,9 +112,9 @@ class Config:
             "PARQUET_FILENAME", "bitvavo_1min_candles_eur.parquet"
         )
         self.PRICE_INCREASE_THRESHOLD = float(
-            os.getenv("PRICE_INCREASE_THRESHOLD", 0.15)
+            os.getenv("PRICE_INCREASE_THRESHOLD", 1.25)
         )
-        self.MIN_VOLUME_EUR = float(os.getenv("MIN_VOLUME_EUR", 1000))
+        self.MIN_VOLUME_EUR = float(os.getenv("MIN_VOLUME_EUR", 5000))
         self.PORTFOLIO_VALUE = float(os.getenv("PORTFOLIO_VALUE", 10000))
         self.ALLOCATION_PER_TRADE = float(os.getenv("ALLOCATION_PER_TRADE", 0.1))
         self.BUY_FEE = float(os.getenv("BUY_FEE", 0.0015))
@@ -155,7 +155,7 @@ class Config:
         self.PRICE_RANGE_PERCENT = self.parse_float_env("PRICE_RANGE_PERCENT", 10.0)
         self.MAX_SLIPPAGE_BUY = self.parse_float_env("MAX_SLIPPAGE_BUY", 0.025)
         self.MAX_SLIPPAGE_SELL = self.parse_float_env("MAX_SLIPPAGE_SELL", -0.05)
-        self.MIN_TOTAL_SCORE = self.parse_float_env("MIN_TOTAL_SCORE", 0.7)
+        self.MIN_TOTAL_SCORE = self.parse_float_env("MIN_TOTAL_SCORE", 0.75)
         self.USE_RSI = bool(os.getenv("USE_RSI", True))
         self.RSI_PERIOD = int(os.getenv("RSI_PERIOD", 14))
         self.RSI_OVERBOUGHT = int(os.getenv("RSI_OVERBOUGHT", 70))
