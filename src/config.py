@@ -118,7 +118,7 @@ class Config:
             "PARQUET_FILENAME", "bitvavo_1min_candles_eur.parquet"
         )
         self.PRICE_INCREASE_THRESHOLD = float(
-            os.getenv("PRICE_INCREASE_THRESHOLD", 1.25)
+            os.getenv("PRICE_INCREASE_THRESHOLD", 1.00)
         )
         self.MIN_VOLUME_EUR = float(os.getenv("MIN_VOLUME_EUR", 5000))
         self.PORTFOLIO_VALUE = float(os.getenv("PORTFOLIO_VALUE", 10000))
@@ -177,6 +177,8 @@ class Config:
         self.USE_BOLLINGER_BANDS = bool(os.getenv("USE_BOLLINGER_BANDS", True))
         self.BOLLINGER_PERIOD = int(os.getenv("BOLLINGER_PERIOD", 20))
         self.BOLLINGER_STD_DEV = self.parse_float_env("BOLLINGER_STD_DEV", 2.0)
+
+        self.MIN_BULLISH_INDICATOR = self.parse_float_env("MIN_BULLISH_INDICATOR", 0.7) # Default 0.6
 
         if self.MAX_ACTIVE_ASSETS < 1:
             logger.warning(

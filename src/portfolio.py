@@ -441,6 +441,147 @@ def save_portfolio():
         send_alert("Portfolio Save Failure", f"Unexpected error: {e}")
 
 
+def calculate_bullish_indicator(combined_df, time_window_minutes=10):
+    """
+    Calculate a bullish market indicator for the last 10 minutes using combined_df.
+
+    Args:
+        combined_df (pandas.DataFrame): DataFrame with OHLCV data for multiple symbols.
+        time_window_minutes (int): Time window for analysis (default: 10).
+
+    Returns:
+        float: Bullish indicator (0.0 to 1.0), or 0.5 if insufficient data.
+    """
+    try:
+        if not isinstance(combined_df, pd.DataFrame) or not {
+            "timestamp",
+            "open",
+            "close",
+            "high",
+            "low",
+            "volume",
+            "symbol"
+        }.issubset(combined_df.columns):
+            logger.error("Invalid combined_df structure for bullish indicator calculation")
+            return 0.5
+
+        # Ensure timestamps are in UTC
+        if combined_df["timestamp"].dt.tz is not None:
+            logger.warning("combined_df timestamps are timezone-aware. Converting to UTC.")
+            combined_df = combined_df.copy()
+            combined_df["timestamp"] = combined_df["timestamp"].dt.tz_convert("UTC").dt.tz_localize(None)
+
+        # Filter for the last 10 minutes
+        current_time = datetime.utcnow()
+        start_time = current_time - timedelta(minutes=time_window_minutes)
+        df_latest = combined_df[combined_df["timestamp"] >= start_time].copy()
+
+        logger.debug(
+            f"Filtered {len(df_latest)} candles in the last {time_window_minutes} minutes "
+            f"(from {start_time} to {current_time})"
+        )
+        if df_latest.empty:
+            logger.warning(f"No data in combined_df for the last {time_window_minutes} minutes. Trying 15-minute window.")
+            start_time = current_time - timedelta(minutes=15)
+            df_latest = combined_df[combined_df["timestamp"] >= start_time].copy()
+            logger.debug(f"Filtered {len(df_latest)} candles in the last 15 minutes")
+
+        if df_latest.empty:
+            logger.warning("No data available even in 15-minute window. Returning neutral indicator.")
+            return 0.5
+
+        # Calculate price change and volatility
+        df_latest["price_change_pct"] = (
+            (df_latest["close"] - df_latest["open"]) / df_latest["open"] * 100
+        )
+        # Alternative VWPM calculation using close-to-previous-close
+        df_latest = df_latest.sort_values(["symbol", "timestamp"])
+        df_latest["prev_close"] = df_latest.groupby("symbol")["close"].shift(1)
+        df_latest["price_change_prev_pct"] = (
+            (df_latest["close"] - df_latest["prev_close"]) / df_latest["prev_close"] * 100
+        ).fillna(df_latest["price_change_pct"])  # Fallback to open-close if no previous close
+        df_latest["volatility"] = (
+            (df_latest["high"] - df_latest["low"]) / df_latest["open"] * 100
+        )
+
+        # Aggregate by symbol
+        df_agg = (
+            df_latest.groupby("symbol")
+            .agg({
+                "price_change_pct": "mean",
+                "price_change_prev_pct": "mean",
+                "volume": "sum",
+                "volatility": "mean"
+            })
+            .reset_index()
+        )
+
+        # Calculate sentiment metrics
+        # 1. Market Breadth Index (MBI)
+        df_agg["abs_price_change"] = df_agg["price_change_pct"].abs()
+        mbi = (
+            df_agg[df_agg["price_change_pct"] > 0]["abs_price_change"].sum()
+            / df_agg["abs_price_change"].sum()
+            if df_agg["abs_price_change"].sum() > 0
+            else 0.5
+        )
+
+        # 2. Volume-Weighted Price Momentum (VWPM)
+        df_agg["volume_weighted_change"] = df_agg["price_change_prev_pct"] * df_agg["volume"]
+        vwpm = (
+            df_agg["volume_weighted_change"].sum() / df_agg["volume"].sum()
+            if df_agg["volume"].sum() > 0
+            else 0.0
+        )
+
+        # 3. Volatility-Adjusted Sentiment (VAS)
+        df_agg["normalized_change"] = df_agg["price_change_pct"] / df_agg[
+            "volatility"
+        ].replace(0, 1)
+        vas = df_agg["normalized_change"].mean()
+
+        # 4. Advance/Decline Ratio
+        advancers = len(df_agg[df_agg["price_change_pct"] > 0])
+        decliners = len(df_agg[df_agg["price_change_pct"] < 0])
+        ad_ratio = (
+            advancers / decliners
+            if decliners > 0
+            else float("inf") if advancers > 0 else 0.0
+        )
+
+        # 5. Volume Ratio
+        bullish_volume = df_agg[df_agg["price_change_pct"] > 0]["volume"].sum()
+        bearish_volume = df_agg[df_agg["price_change_pct"] < 0]["volume"].sum()
+        volume_ratio = (
+            bullish_volume / bearish_volume
+            if bearish_volume > 0
+            else float("inf") if bullish_volume > 0 else 0.0
+        )
+
+        # Combine sentiment scores
+        sentiment_scores = [
+            mbi > 0.5,
+            vwpm > 0,
+            vas > 0,
+            ad_ratio > 1,
+            volume_ratio > 1,
+        ]
+        bullish_count = sum(sentiment_scores)
+        total_metrics = len(sentiment_scores)
+        bullish_indicator = bullish_count / total_metrics if total_metrics > 0 else 0.5
+
+        logger.info(
+            f"Bullish indicator: {bullish_indicator:.2f} (MBI: {mbi:.2f}, VWPM: {vwpm:.2f}, "
+            f"VAS: {vas:.2f}, AD Ratio: {ad_ratio:.2f}, Volume Ratio: {volume_ratio:.2f})"
+        )
+        return bullish_indicator
+
+    except Exception as e:
+        logger.error(f"Error calculating bullish indicator: {e}", exc_info=True)
+        send_alert("Bullish Indicator Failure", f"Error calculating bullish indicator: {e}")
+        return 0.5
+
+
 def manage_portfolio(
     above_threshold_data,
     percent_changes,
@@ -482,6 +623,21 @@ def manage_portfolio(
             raise ValueError("sell_slippages must be a dictionary")
         if combined_df is not None and not isinstance(combined_df, pd.DataFrame):
             raise ValueError("combined_df must be a pandas DataFrame")
+
+        # Calculate bullish indicator
+        bullish_indicator = (
+            calculate_bullish_indicator(combined_df, time_window_minutes=10)
+            if combined_df is not None
+            else 0.5
+        )
+        # logger.info(
+        #     f"Market bullish indicator: {bullish_indicator:.2f} (threshold: {config.config.MIN_BULLISH_INDICATOR:.2f})"
+        # )
+        if bullish_indicator < config.config.MIN_BULLISH_INDICATOR:
+            logger.info(
+                f"Skipping buy decisions: Bullish indicator {bullish_indicator:.2f} below threshold {config.config.MIN_BULLISH_INDICATOR:.2f}"
+            )
+            above_threshold_data = []  # Prevent buying by clearing the list
 
         current_time = datetime.utcnow()
         five_min_ago = current_time - timedelta(minutes=5)
