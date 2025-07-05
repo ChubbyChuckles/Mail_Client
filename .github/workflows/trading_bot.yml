@@ -22,7 +22,7 @@ concurrency:
 jobs:
   trading-bot:
     runs-on: ubuntu-latest
-    timeout-minutes: 246  # 4 hours and 3 minutes
+    timeout-minutes: 255  # 4 hours and 3 minutes
 
     steps:
       # Checkout the repository (github branch)
