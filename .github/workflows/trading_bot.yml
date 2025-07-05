@@ -54,6 +54,9 @@ jobs:
           if [ -f /tmp/portfolio.json ]; then
             cp /tmp/portfolio.json .
           fi
+          if [ -f /tmp/state.json ]; then
+            cp /tmp/state.json .
+          fi
           if [ -f /tmp/buy_trades.csv ]; then
             cp /tmp/buy_trades.csv .
           fi
@@ -87,8 +90,10 @@ jobs:
           path: |
             /tmp/*.csv
             /tmp/portfolio.json
+            /tmp/state.json
             /tmp/data_1m_pq_alot/*.parquet
             *.csv
             portfolio.json
+            state.json
             data_1m_pq_alot/*.parquet
           retention-days: 7
