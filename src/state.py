@@ -28,7 +28,7 @@ ban_expiry_time = 0
 def load_portfolio():
     """Loads the portfolio from the environment-specific file path or its backups."""
     global portfolio
-    portfolio_path = config.config.PORTFOLIO_PATH
+    portfolio_path = config.config.PORTFOLIO_FILE
     try:
         with open(portfolio_path, "r") as f:
             portfolio_data = json.load(f)
