@@ -1,11 +1,11 @@
 # trading_bot/src/storage.py
+import glob
 import json
 import os
 import shutil
 import tempfile
 import time
 from datetime import datetime
-import glob
 
 import pandas as pd
 import pyarrow as pa
@@ -14,8 +14,9 @@ from tenacity import (retry, retry_if_exception_type, stop_after_attempt,
                       wait_exponential)
 
 from . import config
-from .config import logger, IS_GITHUB_ACTIONS
+from .config import IS_GITHUB_ACTIONS, logger
 from .state import portfolio, portfolio_lock
+
 
 @retry(
     stop=stop_after_attempt(3),
@@ -83,7 +84,9 @@ def save_to_local(df, output_path):
 
             # In GitHub Actions, log file creation for artifact tracking
             if IS_GITHUB_ACTIONS:
-                logger.info(f"Parquet file saved at {output_path} for artifact collection")
+                logger.info(
+                    f"Parquet file saved at {output_path} for artifact collection"
+                )
         finally:
             if os.path.exists(temp_file.name):
                 try:
@@ -190,12 +193,15 @@ def save_portfolio():
                         logger.debug(f"Deleted old backup file: {old_file}")
                     except OSError as e:
                         logger.warning(
-                            f"Error deleting old backup file {old_file}: {e}", exc_info=True
+                            f"Error deleting old backup file {old_file}: {e}",
+                            exc_info=True,
                         )
 
             # In GitHub Actions, log file creation for artifact tracking
             if IS_GITHUB_ACTIONS:
-                logger.info(f"Portfolio file saved at {file_path} for artifact collection")
+                logger.info(
+                    f"Portfolio file saved at {file_path} for artifact collection"
+                )
         finally:
             portfolio_lock.release()
     except ValueError as e:

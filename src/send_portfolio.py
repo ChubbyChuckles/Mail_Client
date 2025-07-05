@@ -1,9 +1,11 @@
 # trading_bot/src/send_portfolio.py
 import json
+import logging
 import os
 from datetime import datetime
-import logging
+
 import telegram  # Use python-telegram-bot==13.7 for synchronous API
+
 from . import config
 from .config import IS_GITHUB_ACTIONS
 
@@ -18,17 +20,17 @@ else:
 handler.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))
 logger.addHandler(handler)
 
+
 def format_portfolio_message(portfolio_data):
     """Formats the portfolio data into a visually appealing Telegram message."""
     try:
         # Extract cash and assets
         cash = portfolio_data.get("cash", 0.0)
         assets = portfolio_data.get("assets", {})
-        
+
         # Calculate total portfolio value
         total_asset_value = sum(
-            asset["quantity"] * asset["current_price"]
-            for asset in assets.values()
+            asset["quantity"] * asset["current_price"] for asset in assets.values()
         )
         total_value = cash + total_asset_value
 
@@ -51,7 +53,7 @@ def format_portfolio_message(portfolio_data):
                 quantity = asset["quantity"]
                 unrealized_pl = (current_price - purchase_price) * quantity
                 unrealized_pl_percent = ((current_price / purchase_price) - 1) * 100
-                
+
                 # Calculate holding time
                 purchase_time = datetime.fromisoformat(asset["purchase_time"])
                 holding_time = datetime.utcnow() - purchase_time
@@ -62,7 +64,9 @@ def format_portfolio_message(portfolio_data):
                 message.append(f"  Quantity: {quantity:,.2f}")
                 message.append(f"  Current Price: €{current_price:,.4f}")
                 message.append(f"  Purchase Price: €{purchase_price:,.4f}")
-                message.append(f"  Unrealized P/L: €{unrealized_pl:,.2f} ({unrealized_pl_percent:+.2f}%)")
+                message.append(
+                    f"  Unrealized P/L: €{unrealized_pl:,.2f} ({unrealized_pl_percent:+.2f}%)"
+                )
                 message.append(f"  Holding Time: {holding_minutes:.1f} minutes")
                 message.append(f"  Highest Price: €{asset['highest_price']:,.4f}")
                 message.append(f"  Sell Price: €{asset['sell_price']:,.4f}")
@@ -71,11 +75,14 @@ def format_portfolio_message(portfolio_data):
                 message.append("")
 
         # Footer with timestamp
-        message.append(f"🕒 *Updated*: {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')}")
+        message.append(
+            f"🕒 *Updated*: {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')}"
+        )
         return "\n".join(message)
     except Exception as e:
         logger.error(f"Error formatting portfolio message: {e}", exc_info=True)
         return f"⚠️ Error formatting portfolio data: {str(e)}"
+
 
 def send_startup_message():
     """Sends a Telegram message signaling the bot has started."""
@@ -95,9 +102,7 @@ def send_startup_message():
             f"🌐 *Environment*: {'GitHub Actions' if IS_GITHUB_ACTIONS else 'Local'}"
         )
         bot.send_message(
-            chat_id=chat_id,
-            text=message,
-            parse_mode=telegram.ParseMode.MARKDOWN
+            chat_id=chat_id, text=message, parse_mode=telegram.ParseMode.MARKDOWN
         )
         logger.info("Sent startup message via Telegram")
     except telegram.error.InvalidToken:
@@ -106,6 +111,7 @@ def send_startup_message():
         logger.error(f"Telegram error sending startup message: {e}", exc_info=True)
     except Exception as e:
         logger.error(f"Error sending startup message: {e}", exc_info=True)
+
 
 def send_shutdown_message():
     """Sends a Telegram message signaling the bot has shut down."""
@@ -125,9 +131,7 @@ def send_shutdown_message():
             f"🌐 *Environment*: {'GitHub Actions' if IS_GITHUB_ACTIONS else 'Local'}"
         )
         bot.send_message(
-            chat_id=chat_id,
-            text=message,
-            parse_mode=telegram.ParseMode.MARKDOWN
+            chat_id=chat_id, text=message, parse_mode=telegram.ParseMode.MARKDOWN
         )
         logger.info("Sent shutdown message via Telegram")
     except telegram.error.InvalidToken:
@@ -136,6 +140,7 @@ def send_shutdown_message():
         logger.error(f"Telegram error sending shutdown message: {e}", exc_info=True)
     except Exception as e:
         logger.error(f"Error sending shutdown message: {e}", exc_info=True)
+
 
 def send_portfolio():
     """Reads portfolio.json and sends the formatted data via Telegram synchronously."""
@@ -160,7 +165,7 @@ def send_portfolio():
             bot.send_message(
                 chat_id=chat_id,
                 text=f"⚠️ *Portfolio File Error*\nPortfolio file not found: {portfolio_path}",
-                parse_mode=telegram.ParseMode.MARKDOWN
+                parse_mode=telegram.ParseMode.MARKDOWN,
             )
             return
 
@@ -170,9 +175,7 @@ def send_portfolio():
         # Format and send message
         message = format_portfolio_message(portfolio_data)
         bot.send_message(
-            chat_id=chat_id,
-            text=message,
-            parse_mode=telegram.ParseMode.MARKDOWN
+            chat_id=chat_id, text=message, parse_mode=telegram.ParseMode.MARKDOWN
         )
         logger.info(f"Sent portfolio update via Telegram from {portfolio_path}")
     except telegram.error.TelegramError as e:
@@ -180,7 +183,7 @@ def send_portfolio():
         bot.send_message(
             chat_id=chat_id,
             text=f"⚠️ *Portfolio Send Failure*\nTelegram error: {str(e)}",
-            parse_mode=telegram.ParseMode.MARKDOWN
+            parse_mode=telegram.ParseMode.MARKDOWN,
         )
     except Exception as e:
         logger.error(f"Error sending portfolio update: {e}", exc_info=True)
@@ -188,10 +191,11 @@ def send_portfolio():
             bot.send_message(
                 chat_id=chat_id,
                 text=f"⚠️ *Portfolio Send Failure*\nError: {str(e)}",
-                parse_mode=telegram.ParseMode.MARKDOWN
+                parse_mode=telegram.ParseMode.MARKDOWN,
             )
         except telegram.error.TelegramError as te:
             logger.error(f"Failed to send error notification: {te}", exc_info=True)
+
 
 if __name__ == "__main__":
     send_portfolio()

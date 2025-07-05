@@ -1,12 +1,12 @@
 # trading_bot/src/clean_up.py
+import datetime
 import glob
 import os
+import shutil
 from pathlib import Path
 from typing import List
-import shutil
-import datetime
 
-from .config import logger, IS_GITHUB_ACTIONS
+from .config import IS_GITHUB_ACTIONS, logger
 
 
 def move_files_to_archive(source_dir: str, archive_dir: str) -> None:
@@ -50,7 +50,9 @@ def move_files_to_archive(source_dir: str, archive_dir: str) -> None:
                 if destination_file.exists():
                     # Append timestamp to avoid overwriting
                     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-                    destination_file = archive_path / f"{file.stem}_{timestamp}{file.suffix}"
+                    destination_file = (
+                        archive_path / f"{file.stem}_{timestamp}{file.suffix}"
+                    )
                 shutil.move(str(file), str(destination_file))
                 logger.info(f"Moved file: {file} to {destination_file}")
                 moved_files += 1
@@ -100,7 +102,9 @@ def delete_old_files(directories: List[str], keep_count: int = 5) -> None:
             files_to_delete = files[keep_count:]
 
             if not files_to_delete:
-                logger.info(f"Directory {directory} has {len(files)} files, all will be kept (less than or equal to {keep_count})")
+                logger.info(
+                    f"Directory {directory} has {len(files)} files, all will be kept (less than or equal to {keep_count})"
+                )
                 continue
 
             # Delete older files
@@ -113,7 +117,9 @@ def delete_old_files(directories: List[str], keep_count: int = 5) -> None:
                 except Exception as e:
                     logger.error(f"Error deleting file {file}: {str(e)}")
 
-            logger.info(f"Directory {directory}: Kept {min(keep_count, len(files))} files, deleted {len(files_to_delete)} files")
+            logger.info(
+                f"Directory {directory}: Kept {min(keep_count, len(files))} files, deleted {len(files_to_delete)} files"
+            )
 
         except Exception as e:
             logger.error(f"Error processing directory {directory}: {str(e)}")
@@ -132,17 +138,23 @@ def garbage_collection():
     ]
 
     # Define source directory for Parquet files
-    source_dir = config.config.RESULTS_FOLDER  # Uses /tmp/data_1m_pq_alot in GitHub Actions
+    source_dir = (
+        config.config.RESULTS_FOLDER
+    )  # Uses /tmp/data_1m_pq_alot in GitHub Actions
     archive_dir = r"F:\Crypto_Trading\Market_Data"  # Only used locally
 
     try:
         if IS_GITHUB_ACTIONS:
             # In GitHub Actions, delete old Parquet files instead of archiving
-            logger.info(f"Running garbage collection in GitHub Actions: Deleting old Parquet files in {source_dir}")
+            logger.info(
+                f"Running garbage collection in GitHub Actions: Deleting old Parquet files in {source_dir}"
+            )
             delete_old_files([source_dir], keep_count=5)
         else:
             # Local PC: Move Parquet files to archive and clean up directories
-            logger.info(f"Running garbage collection locally: Moving files from {source_dir} to {archive_dir}")
+            logger.info(
+                f"Running garbage collection locally: Moving files from {source_dir} to {archive_dir}"
+            )
             move_files_to_archive(source_dir, archive_dir)
             # Optionally include archive_dir for cleanup
             # directories.append(archive_dir)

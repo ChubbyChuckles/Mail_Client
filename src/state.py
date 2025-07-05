@@ -5,8 +5,7 @@ from datetime import datetime
 from threading import Lock, RLock
 
 from . import config
-from .config import logger, IS_GITHUB_ACTIONS
-
+from .config import IS_GITHUB_ACTIONS, logger
 
 # Initialize global state
 portfolio = {"cash": config.config.PORTFOLIO_VALUE, "assets": {}}
@@ -19,6 +18,7 @@ weight_used = 0
 last_reset_time = time.time()
 is_banned = False
 ban_expiry_time = 0
+
 
 def load_portfolio():
     """Loads the portfolio from the environment-specific file path or its backups."""
@@ -47,9 +47,7 @@ def load_portfolio():
         # Try loading from latest backup
         import glob
 
-        backup_files = sorted(
-            glob.glob(f"{portfolio_path}.backup_*"), reverse=True
-        )
+        backup_files = sorted(glob.glob(f"{portfolio_path}.backup_*"), reverse=True)
         for backup_file in backup_files:
             try:
                 with open(backup_file, "r") as f:
@@ -79,6 +77,7 @@ def load_portfolio():
             )
             portfolio = {"cash": config.config.PORTFOLIO_VALUE, "assets": {}}
 
+
 def save_state():
     """Saves the bot state to the environment-specific file path."""
     state_path = "/tmp/state.json" if IS_GITHUB_ACTIONS else "state.json"
@@ -95,6 +94,7 @@ def save_state():
     except Exception as e:
         logger.error(f"Error saving state to {state_path}: {e}", exc_info=True)
 
+
 def load_state():
     """Loads the bot state from the environment-specific file path."""
     global low_volatility_assets, negative_momentum_counts, weight_used, last_reset_time
@@ -109,6 +109,7 @@ def load_state():
         logger.info(f"Loaded state from {state_path}")
     except Exception as e:
         logger.error(f"Error loading state from {state_path}: {e}", exc_info=True)
+
 
 # Call load_portfolio() and load_state() at startup
 load_portfolio()

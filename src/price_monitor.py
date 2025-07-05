@@ -8,7 +8,7 @@ import pandas as pd
 from ccxt.base.errors import PermissionDenied
 
 from . import config
-from .config import logger, IS_GITHUB_ACTIONS
+from .config import IS_GITHUB_ACTIONS, logger
 from .exchange import (bitvavo, check_rate_limit, handle_ban_error, semaphore,
                        wait_until_ban_lifted)
 from .portfolio import sell_asset
@@ -49,7 +49,9 @@ class PriceMonitorManager:
                 )[: current_threads - effective_max_threads]
                 for symbol, _ in threads_to_stop:
                     self.stop(symbol)
-                logger.info(f"Reduced active monitoring threads to {effective_max_threads}")
+                logger.info(
+                    f"Reduced active monitoring threads to {effective_max_threads}"
+                )
 
     def handle_ticker(self, symbol, portfolio, portfolio_lock, candles_df):
         """
@@ -162,7 +164,7 @@ class PriceMonitorManager:
                         wait_until_ban_lifted(ban_expiry)
                         self.telegram_notifier.notify_error(
                             "API Ban Detected",
-                            f"API banned for {symbol} until {datetime.utcfromtimestamp(ban_expiry)}."
+                            f"API banned for {symbol} until {datetime.utcfromtimestamp(ban_expiry)}.",
                         )
                         continue
                     logger.error(f"Permission denied for {symbol}: {e}")
@@ -173,7 +175,7 @@ class PriceMonitorManager:
                         self.stop(symbol)
                         self.telegram_notifier.notify_error(
                             "Monitoring Stopped",
-                            f"Stopped monitoring {symbol} due to repeated ticker errors."
+                            f"Stopped monitoring {symbol} due to repeated ticker errors.",
                         )
                         break
                     time.sleep(0.1)
@@ -186,15 +188,14 @@ class PriceMonitorManager:
                         self.stop(symbol)
                         self.telegram_notifier.notify_error(
                             "Monitoring Stopped",
-                            f"Stopped monitoring {symbol} due to repeated ticker errors: {e}"
+                            f"Stopped monitoring {symbol} due to repeated ticker errors: {e}",
                         )
                         break
                     time.sleep(0.1)
         except Exception as e:
             logger.error(f"Price monitoring error for {symbol}: {e}", exc_info=True)
             self.telegram_notifier.notify_error(
-                "Price Monitoring Failure",
-                f"Error monitoring {symbol}: {e}"
+                "Price Monitoring Failure", f"Error monitoring {symbol}: {e}"
             )
         finally:
             logger.info(f"Stopped price monitoring for {symbol}")
@@ -382,9 +383,7 @@ class PriceMonitorManager:
         if symbol not in self.threads and symbol not in low_volatility_assets:
             with threading.Lock():
                 global weight_used
-                max_threads = (
-                    config.config.CONCURRENT_REQUESTS
-                )
+                max_threads = config.config.CONCURRENT_REQUESTS
                 if len(self.threads) >= max_threads:
                     logger.warning(
                         f"Max threads ({max_threads}) reached. Cannot start monitoring for {symbol}."
@@ -439,7 +438,7 @@ class PriceMonitorManager:
                 )
                 self.telegram_notifier.notify_error(
                     "Stop Monitor Failure",
-                    f"Error stopping price monitor for {symbol}: {e}"
+                    f"Error stopping price monitor for {symbol}: {e}",
                 )
             finally:
                 self.threads.pop(symbol, None)

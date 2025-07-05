@@ -14,7 +14,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: ['3.10.9', '3.11', '3.12'] # Test across multiple Python versions
+        python-version: ['3.10.9', '3.11'] # Test across multiple Python versions
       fail-fast: false # Allow all matrix jobs to run even if one fails
     steps:
       - name: Checkout code

@@ -1,10 +1,11 @@
 import logging
+import os
 import time
 from urllib.parse import urlencode
+
 import requests
-from python_bitvavo_api.bitvavo import Bitvavo
 from dotenv import load_dotenv
-import os
+from python_bitvavo_api.bitvavo import Bitvavo
 
 # Configure logging
 logging.basicConfig(
@@ -46,6 +47,7 @@ bitvavo = Bitvavo(
 # Base URL for direct REST API calls
 BASE_URL = "https://api.bitvavo.com/v2"
 
+
 def get_rate_limit_remaining(endpoint="/time", params=None):
     """Fetch the remaining rate limit weight using a direct REST call."""
     try:
@@ -65,6 +67,7 @@ def get_rate_limit_remaining(endpoint="/time", params=None):
             logger.info("Falling back to /markets endpoint")
             return get_rate_limit_remaining(endpoint="/markets")
         return None
+
 
 def measure_action_weight(action_name, action_func):
     """Measure the weight consumed by an API action."""
@@ -99,6 +102,7 @@ def measure_action_weight(action_name, action_func):
         )
         return None
 
+
 def get_current_price():
     """Fetch the current market price for the given symbol."""
     ticker = bitvavo.tickerPrice({"market": SYMBOL})
@@ -106,13 +110,16 @@ def get_current_price():
         return float(ticker["price"])
     raise Exception("Unable to fetch current price.")
 
+
 def round_to_precision(value, precision):
     """Round a number to the specified number of significant digits."""
     if value == 0:
         return 0
     from math import floor, log10
+
     scale = precision - 1 - floor(log10(abs(value)))
     return round(value, scale if scale > 0 else 0)
+
 
 def get_market_precision():
     """Get precision details for the market."""
@@ -127,6 +134,7 @@ def get_market_precision():
             min_amount = float(market.get("minAmount", 0.0))
             break
     return amount_precision, price_precision, min_amount
+
 
 # Define actions to test
 actions = [
@@ -168,18 +176,19 @@ actions = [
                 body={
                     "amount": str(
                         round_to_precision(
-                            AMOUNT_EUR_BUY / (get_current_price() * (1 - PERCENTAGE_BELOW / 100)),
-                            get_market_precision()[0]
+                            AMOUNT_EUR_BUY
+                            / (get_current_price() * (1 - PERCENTAGE_BELOW / 100)),
+                            get_market_precision()[0],
                         )
                     ),
                     "price": str(
                         round_to_precision(
                             get_current_price() * (1 - PERCENTAGE_BELOW / 100),
-                            get_market_precision()[1]
+                            get_market_precision()[1],
                         )
                     ),
                     "operatorId": str(OPERATOR_ID),
-                }
+                },
             )
         )(),
     },
@@ -194,23 +203,29 @@ actions = [
                     body={
                         "amount": str(
                             round_to_precision(
-                                AMOUNT_EUR_SELL / (get_current_price() * (1 + PERCENTAGE_ABOVE / 100)),
-                                get_market_precision()[0]
+                                AMOUNT_EUR_SELL
+                                / (get_current_price() * (1 + PERCENTAGE_ABOVE / 100)),
+                                get_market_precision()[0],
                             )
                         ),
                         "price": str(
                             round_to_precision(
                                 get_current_price() * (1 + PERCENTAGE_ABOVE / 100),
-                                get_market_precision()[1]
+                                get_market_precision()[1],
                             )
                         ),
                         "operatorId": str(OPERATOR_ID),
-                    }
+                    },
                 )
-                if float(bitvavo.balance({"symbol": SYMBOL.split('-')[0]})[0].get("available", 0))
+                if float(
+                    bitvavo.balance({"symbol": SYMBOL.split("-")[0]})[0].get(
+                        "available", 0
+                    )
+                )
                 >= round_to_precision(
-                    AMOUNT_EUR_SELL / (get_current_price() * (1 + PERCENTAGE_ABOVE / 100)),
-                    get_market_precision()[0]
+                    AMOUNT_EUR_SELL
+                    / (get_current_price() * (1 + PERCENTAGE_ABOVE / 100)),
+                    get_market_precision()[0],
                 )
                 else None
             )
@@ -223,7 +238,7 @@ actions = [
                 bitvavo.cancelOrder(
                     market=SYMBOL,
                     orderId=bitvavo.ordersOpen({"market": SYMBOL})[0]["orderId"],
-                    operatorId=str(OPERATOR_ID)
+                    operatorId=str(OPERATOR_ID),
                 )
                 if bitvavo.ordersOpen({"market": SYMBOL})
                 else None
@@ -231,6 +246,7 @@ actions = [
         )(),
     },
 ]
+
 
 def main():
     logger.info("Starting Bitvavo API weight measurement")
@@ -242,6 +258,7 @@ def main():
         time.sleep(2)  # Avoid rate limit issues
 
     logger.info("Weight measurement completed")
+
 
 if __name__ == "__main__":
     main()

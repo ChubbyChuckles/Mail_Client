@@ -1,29 +1,33 @@
 # trading_bot/tests/test_utils.py
-import unittest
-from unittest.mock import patch, MagicMock
-import numpy as np
 import logging
-import sys
 import os
+import sys
+import unittest
+from unittest.mock import MagicMock, patch
+
+import numpy as np
 
 from src.utils import calculate_dynamic_ema_period, calculate_rsi
+
 
 # Mock config for IS_GITHUB_ACTIONS
 class MockConfig:
     IS_GITHUB_ACTIONS = False
 
+
 # Setup logging for tests
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
+
 class TestUtils(unittest.TestCase):
     def setUp(self):
         """Set up mocks for logger and send_alert before each test."""
-        self.logger_patcher = patch('src.utils.logger', MagicMock())
-        self.send_alert_patcher = patch('src.utils.send_alert', MagicMock())
+        self.logger_patcher = patch("src.utils.logger", MagicMock())
+        self.send_alert_patcher = patch("src.utils.send_alert", MagicMock())
         self.mock_logger = self.logger_patcher.start()
         self.mock_send_alert = self.send_alert_patcher.start()
-        self.config_patcher = patch('src.utils.config', MockConfig())
+        self.config_patcher = patch("src.utils.config", MockConfig())
         self.config_patcher.start()
 
     def tearDown(self):
@@ -39,7 +43,7 @@ class TestUtils(unittest.TestCase):
             holding_minutes=100.0,
             time_stop_minutes=300,
             active_assets=2,
-            asset_threshold=5
+            asset_threshold=5,
         )
         self.assertEqual(result, 5)
         self.mock_logger.debug.assert_called_once()
@@ -52,7 +56,7 @@ class TestUtils(unittest.TestCase):
             holding_minutes=100.0,
             time_stop_minutes=300,
             active_assets=5,
-            asset_threshold=5
+            asset_threshold=5,
         )
         self.assertEqual(result, 7)
         self.mock_logger.debug.assert_called_once()
@@ -65,7 +69,7 @@ class TestUtils(unittest.TestCase):
             holding_minutes=150.0,
             time_stop_minutes=300,
             active_assets=2,
-            asset_threshold=5
+            asset_threshold=5,
         )
         self.assertEqual(result, 8)
         self.mock_logger.debug.assert_called_once()
@@ -78,7 +82,7 @@ class TestUtils(unittest.TestCase):
             holding_minutes=150.0,
             time_stop_minutes=300,
             active_assets=5,
-            asset_threshold=5
+            asset_threshold=5,
         )
         self.assertEqual(result, 10)
         self.mock_logger.debug.assert_called_once()
@@ -91,7 +95,7 @@ class TestUtils(unittest.TestCase):
             holding_minutes=300.0,
             time_stop_minutes=300,
             active_assets=10,
-            asset_threshold=5
+            asset_threshold=5,
         )
         self.assertEqual(result, 10)
         self.mock_logger.debug.assert_called_once()
@@ -104,7 +108,7 @@ class TestUtils(unittest.TestCase):
             holding_minutes=0.0,
             time_stop_minutes=300,
             active_assets=0,
-            asset_threshold=5
+            asset_threshold=5,
         )
         self.assertEqual(result, 5)
         self.mock_logger.debug.assert_called_once()
@@ -117,12 +121,12 @@ class TestUtils(unittest.TestCase):
             holding_minutes="invalid",
             time_stop_minutes=300,
             active_assets=2,
-            asset_threshold=5
+            asset_threshold=5,
         )
         self.assertEqual(result, 5)
         self.mock_logger.error.assert_called_once_with(
             "Error calculating dynamic EMA period: All inputs must be numeric",
-            exc_info=True
+            exc_info=True,
         )
         self.mock_send_alert.assert_not_called()
 
@@ -132,12 +136,12 @@ class TestUtils(unittest.TestCase):
             holding_minutes=-100.0,
             time_stop_minutes=300,
             active_assets=2,
-            asset_threshold=5
+            asset_threshold=5,
         )
         self.assertEqual(result, 5)
         self.mock_logger.error.assert_called_once_with(
             "Error calculating dynamic EMA period: Inputs cannot be negative",
-            exc_info=True
+            exc_info=True,
         )
         self.mock_send_alert.assert_not_called()
 
@@ -148,22 +152,38 @@ class TestUtils(unittest.TestCase):
             holding_minutes=100.0,
             time_stop_minutes=300,
             active_assets=2,
-            asset_threshold=5
+            asset_threshold=5,
         )
         self.assertEqual(result, 5)
         self.mock_logger.error.assert_called_once_with(
             "Unexpected error calculating dynamic EMA period: Unexpected error",
-            exc_info=True
+            exc_info=True,
         )
         self.mock_send_alert.assert_called_once_with(
             "Dynamic EMA Period Failure",
-            "Unexpected error calculating dynamic EMA period: Unexpected error"
+            "Unexpected error calculating dynamic EMA period: Unexpected error",
         )
 
     # Tests for calculate_rsi
     def test_rsi_valid_input(self):
         """Test RSI calculation with valid input and default period."""
-        closes = [100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111, 112, 113, 114]
+        closes = [
+            100,
+            101,
+            102,
+            103,
+            104,
+            105,
+            106,
+            107,
+            108,
+            109,
+            110,
+            111,
+            112,
+            113,
+            114,
+        ]
         result = calculate_rsi(closes, period=14)
         self.assertIsInstance(result, float)
         self.assertGreaterEqual(result, 0)
@@ -179,7 +199,23 @@ class TestUtils(unittest.TestCase):
 
     def test_rsi_zero_losses(self):
         """Test RSI when all changes are gains (avg_loss = 0)."""
-        closes = [100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111, 112, 113, 114]
+        closes = [
+            100,
+            101,
+            102,
+            103,
+            104,
+            105,
+            106,
+            107,
+            108,
+            109,
+            110,
+            111,
+            112,
+            113,
+            114,
+        ]
         result = calculate_rsi(closes, period=14)
         self.assertEqual(result, 100)  # All gains -> RSI = 100
         self.mock_logger.error.assert_not_called()
@@ -209,7 +245,9 @@ class TestUtils(unittest.TestCase):
 
     def test_rsi_numpy_array_input(self):
         """Test RSI with NumPy array input."""
-        closes = np.array([100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111, 112, 113, 114])
+        closes = np.array(
+            [100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111, 112, 113, 114]
+        )
         result = calculate_rsi(closes, period=14)
         self.assertIsInstance(result, float)
         self.assertGreaterEqual(result, 0)

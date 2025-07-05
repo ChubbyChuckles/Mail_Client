@@ -1,4 +1,5 @@
 # trading_bot/src/main.py
+import asyncio
 import os
 import sys
 import threading
@@ -13,20 +14,19 @@ from tenacity import (retry, retry_if_exception_type, stop_after_attempt,
                       wait_exponential)
 
 from . import config
-from .config import logger, IS_GITHUB_ACTIONS
 from .clean_up import garbage_collection
+from .config import IS_GITHUB_ACTIONS, logger
 from .data_processor import colorize_value, verify_and_analyze_data
 from .exchange import bitvavo, check_rate_limit, fetch_klines
 from .portfolio import manage_portfolio, save_portfolio
 from .price_monitor import PriceMonitorManager
 from .print_assets import print_portfolio
 from .print_trade_variables import print_trade_variables
+from .send_portfolio import (send_portfolio, send_shutdown_message,
+                             send_startup_message)
 from .state import (ban_expiry_time, is_banned, low_volatility_assets,
                     portfolio, portfolio_lock)
 from .storage import save_to_local
-from .send_portfolio import send_portfolio, send_startup_message, send_shutdown_message
-import asyncio
-
 
 last_cycle_time = time.time()
 GREEN = "\033[32m"
@@ -34,8 +34,9 @@ BRIGHT_BLUE = "\033[94m"
 YELLOW = "\033[33m"
 RESET = "\033[0m"
 CYCLES = 0
-# Define runtime limit for GitHub Actions (4 hours and 3 minutes = 14580 seconds)
-RUNTIME_LIMIT_SECONDS = 14760 if IS_GITHUB_ACTIONS else float("inf")
+# Define runtime limit for GitHub Actions (4 hours and 15 minutes = 15300 seconds)
+RUNTIME_LIMIT_SECONDS = 15300 if IS_GITHUB_ACTIONS else float("inf")
+
 
 def watchdog(price_monitor_manager):
     global last_cycle_time
@@ -57,15 +58,21 @@ def watchdog(price_monitor_manager):
                     time.sleep(min(ban_expiry_time - current_time, 60))
                 else:
                     logger.error("Main loop hung without ban. Attempting recovery...")
-                    
+
             time.sleep(10)
         except Exception as e:
             logger.error(f"Watchdog error: {e}", exc_info=True)
             time.sleep(10)
 
+
 def center_text(text, total_width=256):
     try:
-        clean_text = text.replace(GREEN, "").replace(RESET, "").replace(BRIGHT_BLUE, "").replace(YELLOW, "")
+        clean_text = (
+            text.replace(GREEN, "")
+            .replace(RESET, "")
+            .replace(BRIGHT_BLUE, "")
+            .replace(YELLOW, "")
+        )
         text_length = len(clean_text)
         padding = (total_width - text_length) // 2
         left_padding = " " * padding
@@ -74,6 +81,7 @@ def center_text(text, total_width=256):
     except TypeError as e:
         logger.error(f"Error in center_text: {e}", exc_info=True)
         return text
+
 
 @retry(
     stop=stop_after_attempt(3),
@@ -86,6 +94,7 @@ def center_text(text, total_width=256):
 )
 def load_markets_with_retry():
     return bitvavo.load_markets()
+
 
 def main():
     global CYCLES
@@ -136,7 +145,9 @@ def main():
         while True:
             # Check runtime limit for GitHub Actions
             if IS_GITHUB_ACTIONS and time.time() - start_time >= RUNTIME_LIMIT_SECONDS:
-                logger.info("Reached 4-hour 3-minute runtime limit in GitHub Actions. Initiating shutdown...")
+                logger.info(
+                    "Reached 4-hour 3-minute runtime limit in GitHub Actions. Initiating shutdown..."
+                )
                 break
 
             try:
@@ -352,6 +363,7 @@ def main():
 
             try:
                 from .state import save_state
+
                 save_state()
             except Exception as e:
                 logger.error(f"Error saving state: {e}", exc_info=True)
@@ -378,9 +390,10 @@ def main():
         perform_shutdown(price_monitor_manager)
         sys.exit(1)
 
+
 def perform_shutdown(price_monitor_manager):
     """Handles graceful shutdown of the bot."""
-  
+
     try:
         price_monitor_manager.stop_all()
     except Exception as e:
@@ -394,6 +407,7 @@ def perform_shutdown(price_monitor_manager):
         logger.error(f"Error saving portfolio during shutdown: {e}", exc_info=True)
     try:
         from .state import save_state
+
         save_state()
     except Exception as e:
         logger.error(f"Error saving state during shutdown: {e}", exc_info=True)
@@ -401,8 +415,10 @@ def perform_shutdown(price_monitor_manager):
     if IS_GITHUB_ACTIONS:
         sys.exit(0)
 
+
 def send_alert(subject, message):
     logger.info(message)
+
 
 if __name__ == "__main__":
     main()

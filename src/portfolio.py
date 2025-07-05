@@ -17,7 +17,7 @@ from tenacity import (retry, retry_if_exception_type, stop_after_attempt,
 from . import config
 from .bitvavo_order_metrics import (calculate_order_book_metrics,
                                     fetch_order_book_with_retry)
-from .config import logger, IS_GITHUB_ACTIONS
+from .config import IS_GITHUB_ACTIONS, logger
 from .exchange import fetch_ticker_price, fetch_trade_details
 from .state import (low_volatility_assets, negative_momentum_counts, portfolio,
                     portfolio_lock)
@@ -88,7 +88,7 @@ def calculate_bollinger_bands(close_prices, period=20, std_dev=2):
         logger.error(f"Error calculating Bollinger Bands: {e}", exc_info=True)
         send_alert(
             "Bollinger Bands Calculation Failure",
-            f"Error calculating Bollinger Bands: {e}"
+            f"Error calculating Bollinger Bands: {e}",
         )
         return None, None, None
 
@@ -147,9 +147,7 @@ def sell_asset(
 
         try:
             logger.debug(f"Starting sell process for {symbol}: {reason}")
-            sale_value = (
-                asset["quantity"] * current_price * (1 - abs(sell_slippage))
-            )
+            sale_value = asset["quantity"] * current_price * (1 - abs(sell_slippage))
             sell_fee = sale_value * config.config.SELL_FEE
             net_sale_value = sale_value - sell_fee
             buy_value = asset["quantity"] * asset["purchase_price"]
@@ -412,12 +410,15 @@ def save_portfolio():
                         logger.debug(f"Deleted old backup file: {old_file}")
                     except OSError as e:
                         logger.warning(
-                            f"Error deleting old backup file {old_file}: {e}", exc_info=True
+                            f"Error deleting old backup file {old_file}: {e}",
+                            exc_info=True,
                         )
 
             # In GitHub Actions, log file creation for artifact tracking
             if IS_GITHUB_ACTIONS:
-                logger.info(f"Portfolio file saved at {file_path} for artifact collection")
+                logger.info(
+                    f"Portfolio file saved at {file_path} for artifact collection"
+                )
         finally:
             portfolio_lock.release()
     except ValueError as e:
@@ -500,8 +501,7 @@ def manage_portfolio(
                         * portfolio["assets"][symbol]["current_price"]
                     )
                     metrics = calculate_order_book_metrics(
-                        symbol.replace("/", "-"),
-                        amount_quote=amount_quote
+                        symbol.replace("/", "-"), amount_quote=amount_quote
                     )
                     if (
                         "error" not in metrics
@@ -520,9 +520,7 @@ def manage_portfolio(
                         f"Error calculating sell slippage for {symbol}: {e}",
                         exc_info=True,
                     )
-                    sell_slippages[symbol] = -(
-                        config.config.MAX_SLIPPAGE_SELL + 0.1
-                    )
+                    sell_slippages[symbol] = -(config.config.MAX_SLIPPAGE_SELL + 0.1)
 
         if not portfolio_lock.acquire(timeout=5):
             logger.error("Timeout acquiring portfolio lock")
@@ -695,9 +693,7 @@ def manage_portfolio(
                     )
                 else:
                     negative_momentum_counts[symbol] = 0
-                buy_fee = asset.get(
-                    "buy_fee", 0
-                )
+                buy_fee = asset.get("buy_fee", 0)
                 total_cost = purchase_price * asset["quantity"] + buy_fee
                 unrealized_profit = (
                     ((current_price * asset["quantity"]) - total_cost) / total_cost
@@ -1024,7 +1020,9 @@ def manage_portfolio(
                         f"Bought {quantity:.4f} {symbol} at {purchase_price:.4f} EUR (close {close_price:.4f}) "
                         f"for {actual_cost:.2f} EUR (after {slippage_buy:.2f}% slippage and {buy_fee:.2f} fee), "
                         f"Trade Count: {trade_count}, Largest Trade Volume EUR: €{largest_trade_volume_eur:.2f}, "
-                        f"RSI: {rsi:.2f}" if rsi is not None else ""
+                        f"RSI: {rsi:.2f}"
+                        if rsi is not None
+                        else ""
                     )
                     for metrics in order_book_metrics_list:
                         if metrics.get("market") == symbol.replace("/", "-"):
@@ -1126,7 +1124,6 @@ def manage_portfolio(
     logger.info(
         f"Portfolio: Cash: {portfolio.get('cash', 0):.2f} EUR, Assets: {len(portfolio.get('assets', {}))}, Total Value: {total_portfolio_value:.2f} EUR"
     )
-   
 
 
 def send_alert(subject, message):

@@ -1,10 +1,12 @@
-from python_bitvavo_api.bitvavo import Bitvavo
-from dotenv import load_dotenv
 import os
+
+from dotenv import load_dotenv
+from python_bitvavo_api.bitvavo import Bitvavo
 
 # Configuration
 SYMBOL = "BTC-EUR"  # Trading pair (e.g., "BTC-EUR", "ETH-EUR")
 DEPTH = 100  # Number of bids and asks to fetch (e.g., 10 for 10 bids and 10 asks)
+
 
 def fetch_order_book():
     try:
@@ -14,13 +16,12 @@ def fetch_order_book():
         api_secret = os.getenv("BITVAVO_API_SECRET")
 
         if not api_key or not api_secret:
-            print("Warning: API key or secret not found in .env file. Attempting to use public endpoint.")
+            print(
+                "Warning: API key or secret not found in .env file. Attempting to use public endpoint."
+            )
 
         # Initialize Bitvavo client
-        bitvavo = Bitvavo({
-            "APIKEY": api_key or "",
-            "APISECRET": api_secret or ""
-        })
+        bitvavo = Bitvavo({"APIKEY": api_key or "", "APISECRET": api_secret or ""})
 
         # Validate depth
         if not isinstance(DEPTH, int) or DEPTH <= 0:
@@ -67,6 +68,7 @@ def fetch_order_book():
 
     except Exception as e:
         print(f"An error occurred: {str(e)}")
+
 
 if __name__ == "__main__":
     fetch_order_book()

@@ -42,6 +42,7 @@ else:
     logger.addHandler(console_handler)
     logger.addHandler(file_handler)
 
+
 class EvaluationLogHandler(logging.Handler):
     def emit(self, record):
         if IS_GITHUB_ACTIONS:
@@ -51,6 +52,7 @@ class EvaluationLogHandler(logging.Handler):
             with open(log_filename, "a", encoding="utf-8") as f:
                 formatted_message = self.format(record)
                 f.write(f"{formatted_message}\n")
+
 
 if not IS_GITHUB_ACTIONS:
     evaluation_handler = EvaluationLogHandler()
@@ -65,6 +67,7 @@ try:
 except (AttributeError, OSError, io.UnsupportedOperation):
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(line_buffering=True)
+
 
 class Config:
     _instance = None
@@ -99,13 +102,16 @@ class Config:
         self.CONCURRENT_REQUESTS = int(os.getenv("CONCURRENT_REQUESTS", 10))
         # Adjust concurrency for GitHub Actions to avoid resource limits
         if IS_GITHUB_ACTIONS:
-            self.CONCURRENT_REQUESTS = min(self.CONCURRENT_REQUESTS, 10)  # Lower concurrency
+            self.CONCURRENT_REQUESTS = min(
+                self.CONCURRENT_REQUESTS, 10
+            )  # Lower concurrency
         self.RATE_LIMIT_WEIGHT = int(os.getenv("RATE_LIMIT_WEIGHT", 1000))
         self.CANDLE_LIMIT = int(os.getenv("CANDLE_LIMIT", 50))
         self.CANDLE_TIMEFRAME = os.getenv("CANDLE_TIMEFRAME", "1m")
         # Adjust paths for GitHub Actions
         self.RESULTS_FOLDER = os.getenv(
-            "RESULTS_FOLDER", "/tmp/data_1m_pq_alot" if IS_GITHUB_ACTIONS else "data_1m_pq_alot"
+            "RESULTS_FOLDER",
+            "/tmp/data_1m_pq_alot" if IS_GITHUB_ACTIONS else "data_1m_pq_alot",
         )
         os.makedirs(self.RESULTS_FOLDER, exist_ok=True)
         self.PARQUET_FILENAME = os.getenv(
@@ -132,7 +138,8 @@ class Config:
         self.MOMENTUM_THRESHOLD = float(os.getenv("MOMENTUM_THRESHOLD", -0.25))
         # Adjust portfolio file path for GitHub Actions
         self.PORTFOLIO_FILE = os.getenv(
-            "PORTFOLIO_FILE", "/tmp/portfolio.json" if IS_GITHUB_ACTIONS else "portfolio.json"
+            "PORTFOLIO_FILE",
+            "/tmp/portfolio.json" if IS_GITHUB_ACTIONS else "portfolio.json",
         )
         self.LOOP_INTERVAL_SECONDS = int(os.getenv("LOOP_INTERVAL_SECONDS", 60))
         self.MAX_ACTIVE_ASSETS = int(os.getenv("MAX_ACTIVE_ASSETS", 8))
@@ -143,13 +150,20 @@ class Config:
         )
         # Adjust CSV file paths for GitHub Actions
         self.BUY_TRADES_CSV = os.getenv(
-            "BUY_TRADES_CSV", "/tmp/buy_trades.csv" if IS_GITHUB_ACTIONS else "buy_trades.csv"
+            "BUY_TRADES_CSV",
+            "/tmp/buy_trades.csv" if IS_GITHUB_ACTIONS else "buy_trades.csv",
         )
         self.FINISHED_TRADES_CSV = os.getenv(
-            "FINISHED_TRADES_CSV", "/tmp/finished_trades.csv" if IS_GITHUB_ACTIONS else "finished_trades.csv"
+            "FINISHED_TRADES_CSV",
+            "/tmp/finished_trades.csv" if IS_GITHUB_ACTIONS else "finished_trades.csv",
         )
         self.ORDER_BOOK_METRICS_CSV = os.getenv(
-            "ORDER_BOOK_METRICS_CSV", "/tmp/order_book_metrics.csv" if IS_GITHUB_ACTIONS else "order_book_metrics.csv"
+            "ORDER_BOOK_METRICS_CSV",
+            (
+                "/tmp/order_book_metrics.csv"
+                if IS_GITHUB_ACTIONS
+                else "order_book_metrics.csv"
+            ),
         )
         self.AMOUNT_QUOTE = self.parse_float_env("AMOUNT_QUOTE", 1000.0)
         self.PRICE_RANGE_PERCENT = self.parse_float_env("PRICE_RANGE_PERCENT", 10.0)
@@ -176,10 +190,14 @@ class Config:
                 "TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID missing. Telegram notifications disabled."
             )
 
-        logger.info(f"Configuration reloaded from .env file. Running in {'GitHub Actions' if IS_GITHUB_ACTIONS else 'Local PC'} mode.")
+        logger.info(
+            f"Configuration reloaded from .env file. Running in {'GitHub Actions' if IS_GITHUB_ACTIONS else 'Local PC'} mode."
+        )
+
 
 # Instantiate the singleton config object
 config = Config()
+
 
 def reload_config():
     config.reload()
