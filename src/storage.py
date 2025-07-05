@@ -16,12 +16,6 @@ from tenacity import (retry, retry_if_exception_type, stop_after_attempt,
 from . import config
 from .config import logger, IS_GITHUB_ACTIONS
 from .state import portfolio, portfolio_lock
-from .telegram_notifications import TelegramNotifier
-
-# Initialize TelegramNotifier for alerts
-telegram_notifier = TelegramNotifier(
-    bot_token=config.config.TELEGRAM_BOT_TOKEN, chat_id=config.config.TELEGRAM_CHAT_ID
-)
 
 @retry(
     stop=stop_after_attempt(3),
@@ -241,7 +235,4 @@ def send_alert(subject, message):
         subject (str): The subject of the alert.
         message (str): The alert message.
     """
-    try:
-        telegram_notifier.notify_error(subject, message)
-    except Exception as e:
-        logger.error(f"Failed to send alert: {subject} - {message}. Error: {e}", exc_info=True)
+    logger.error(message)

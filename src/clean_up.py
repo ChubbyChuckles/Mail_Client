@@ -149,9 +149,3 @@ def garbage_collection():
             delete_old_files(directories, keep_count=5)
     except Exception as e:
         logger.error(f"Unexpected error in garbage collection: {str(e)}")
-        from .telegram_notifications import TelegramNotifier
-        telegram_notifier = TelegramNotifier(
-            bot_token=config.config.TELEGRAM_BOT_TOKEN,
-            chat_id=config.config.TELEGRAM_CHAT_ID
-        )
-        telegram_notifier.notify_error("Garbage Collection Failure", f"Unexpected error: {str(e)}")

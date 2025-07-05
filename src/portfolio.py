@@ -21,17 +21,11 @@ from .config import logger, IS_GITHUB_ACTIONS
 from .exchange import fetch_ticker_price, fetch_trade_details
 from .state import (low_volatility_assets, negative_momentum_counts, portfolio,
                     portfolio_lock)
-from .telegram_notifications import TelegramNotifier
 from .utils import (append_to_buy_trades_csv, append_to_finished_trades_csv,
                     append_to_order_book_metrics_csv,
                     calculate_dynamic_ema_period, calculate_ema, calculate_rsi)
 
 portfolio_values = []  # Store portfolio value history
-
-telegram_notifier = TelegramNotifier(
-    bot_token=config.config.TELEGRAM_BOT_TOKEN, chat_id=config.config.TELEGRAM_CHAT_ID
-)
-asyncio.run_coroutine_threadsafe(telegram_notifier.start(), asyncio.get_event_loop())
 
 
 @retry(
@@ -198,7 +192,6 @@ def sell_asset(
                     f"Price monitor manager is None for {symbol}. Cannot stop monitoring."
                 )
             append_to_finished_trades_csv(finished_trade)
-            telegram_notifier.notify_sell_trade(finished_trade)
         except Exception as e:
             logger.error(
                 f"Failed to process post-sale actions for {symbol}: {e}", exc_info=True
@@ -1012,7 +1005,6 @@ def manage_portfolio(
                         "RSI": f"{rsi:.2f}" if rsi is not None else "N/A",
                     }
                     append_to_buy_trades_csv(buy_trade_data)
-                    telegram_notifier.notify_buy_trade(buy_trade_data)
                     portfolio["assets"][symbol] = {
                         "quantity": quantity,
                         "purchase_price": purchase_price,
@@ -1134,56 +1126,7 @@ def manage_portfolio(
     logger.info(
         f"Portfolio: Cash: {portfolio.get('cash', 0):.2f} EUR, Assets: {len(portfolio.get('assets', {}))}, Total Value: {total_portfolio_value:.2f} EUR"
     )
-    # Periodic Telegram notifications
-    try:
-        if (
-            not hasattr(telegram_notifier, "last_summary_time")
-            or (datetime.utcnow() - telegram_notifier.last_summary_time).total_seconds()
-            >= 3600
-        ):
-            telegram_notifier.notify_portfolio_summary(portfolio)
-            telegram_notifier.last_summary_time = datetime.utcnow()
-
-        if (
-            datetime.utcnow()
-            - getattr(telegram_notifier, "last_pinned_time", datetime.utcnow())
-        ).total_seconds() >= 60:
-            asyncio.run_coroutine_threadsafe(
-                telegram_notifier.update_pinned_summary(portfolio), asyncio.get_event_loop()
-            )
-            telegram_notifier.last_pinned_time = datetime.utcnow()
-
-        if (
-            datetime.utcnow()
-            - getattr(telegram_notifier, "last_chart_time", datetime.utcnow())
-        ).total_seconds() >= 86400:
-            asyncio.run_coroutine_threadsafe(
-                telegram_notifier.notify_performance_chart(portfolio_values),
-                asyncio.get_event_loop(),
-            )
-            telegram_notifier.last_chart_time = datetime.utcnow()
-
-        if (
-            datetime.utcnow()
-            - getattr(telegram_notifier, "last_allocation_time", datetime.utcnow())
-        ).total_seconds() >= 86400:
-            asyncio.run_coroutine_threadsafe(
-                telegram_notifier.notify_asset_allocation(portfolio),
-                asyncio.get_event_loop(),
-            )
-            telegram_notifier.last_allocation_time = datetime.utcnow()
-
-        if datetime.utcnow().hour == 0 and (
-            not hasattr(telegram_notifier, "last_report_date")
-            or datetime.utcnow().date() != telegram_notifier.last_report_date
-        ):
-            asyncio.run_coroutine_threadsafe(
-                telegram_notifier.notify_daily_report(), asyncio.get_event_loop()
-            )
-            telegram_notifier.last_report_date = datetime.utcnow().date()
-    except Exception as e:
-        logger.error(f"Error sending periodic notifications: {e}", exc_info=True)
-        send_alert("Periodic Notification Failure", f"Error sending periodic notifications: {e}")
+   
 
 
 def send_alert(subject, message):
@@ -1194,7 +1137,4 @@ def send_alert(subject, message):
         subject (str): The subject of the alert.
         message (str): The alert message.
     """
-    try:
-        telegram_notifier.notify_error(subject, message)
-    except Exception as e:
-        logger.error(f"Failed to send alert: {subject} - {message}. Error: {e}", exc_info=True)
+    logger.error(message)

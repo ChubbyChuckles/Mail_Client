@@ -6,12 +6,7 @@ from threading import Lock, RLock
 
 from . import config
 from .config import logger, IS_GITHUB_ACTIONS
-from .telegram_notifications import TelegramNotifier
 
-# Initialize Telegram notifier
-telegram_notifier = TelegramNotifier(
-    bot_token=config.config.TELEGRAM_BOT_TOKEN, chat_id=config.config.TELEGRAM_CHAT_ID
-)
 
 # Initialize global state
 portfolio = {"cash": config.config.PORTFOLIO_VALUE, "assets": {}}
@@ -49,9 +44,6 @@ def load_portfolio():
         logger.error(
             f"Error loading portfolio from {portfolio_path}: {e}", exc_info=True
         )
-        telegram_notifier.notify_error(
-            "Portfolio Load Failure", f"Error loading portfolio from {portfolio_path}: {e}"
-        )
         # Try loading from latest backup
         import glob
 
@@ -80,19 +72,12 @@ def load_portfolio():
                 logger.error(
                     f"Error loading backup {backup_file}: {backup_e}", exc_info=True
                 )
-                telegram_notifier.notify_error(
-                    "Portfolio Backup Load Failure", f"Error loading backup {backup_file}: {backup_e}"
-                )
                 continue
         else:
             logger.warning(
                 "No valid portfolio file found. Initializing default portfolio."
             )
             portfolio = {"cash": config.config.PORTFOLIO_VALUE, "assets": {}}
-            telegram_notifier.notify_error(
-                "Portfolio Initialization",
-                f"No valid portfolio file found. Initialized default portfolio with {config.config.PORTFOLIO_VALUE} EUR."
-            )
 
 def save_state():
     """Saves the bot state to the environment-specific file path."""
@@ -109,9 +94,6 @@ def save_state():
         logger.info(f"Saved state to {state_path}")
     except Exception as e:
         logger.error(f"Error saving state to {state_path}: {e}", exc_info=True)
-        telegram_notifier.notify_error(
-            "State Save Failure", f"Error saving state to {state_path}: {e}"
-        )
 
 def load_state():
     """Loads the bot state from the environment-specific file path."""
@@ -127,9 +109,6 @@ def load_state():
         logger.info(f"Loaded state from {state_path}")
     except Exception as e:
         logger.error(f"Error loading state from {state_path}: {e}", exc_info=True)
-        telegram_notifier.notify_error(
-            "State Load Failure", f"Error loading state from {state_path}: {e}"
-        )
 
 # Call load_portfolio() and load_state() at startup
 load_portfolio()

@@ -14,7 +14,6 @@ from .exchange import (bitvavo, check_rate_limit, handle_ban_error, semaphore,
 from .portfolio import sell_asset
 from .state import (ban_expiry_time, is_banned, low_volatility_assets,
                     negative_momentum_counts, weight_used)
-from .telegram_notifications import TelegramNotifier
 from .utils import calculate_dynamic_ema_period, calculate_ema
 
 
@@ -27,10 +26,6 @@ class PriceMonitorManager:
         self.exchange = bitvavo
         self.last_prices = {}
         self.ticker_errors = {}
-        self.telegram_notifier = TelegramNotifier(
-            bot_token=config.config.TELEGRAM_BOT_TOKEN,
-            chat_id=config.config.TELEGRAM_CHAT_ID
-        )
 
     def adjust_concurrency(self, max_threads):
         """

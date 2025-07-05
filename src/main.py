@@ -24,21 +24,16 @@ from .print_trade_variables import print_trade_variables
 from .state import (ban_expiry_time, is_banned, low_volatility_assets,
                     portfolio, portfolio_lock)
 from .storage import save_to_local
+from .send_portfolio import send_portfolio
 import asyncio
-from .telegram_notifications import TelegramNotifier
 
-# Initialize Telegram notifier
-telegram_notifier = TelegramNotifier(
-    bot_token=config.config.TELEGRAM_BOT_TOKEN, chat_id=config.config.TELEGRAM_CHAT_ID
-)
-asyncio.run_coroutine_threadsafe(telegram_notifier.start(), asyncio.get_event_loop())
 
 last_cycle_time = time.time()
 GREEN = "\033[32m"
 BRIGHT_BLUE = "\033[94m"
 YELLOW = "\033[33m"
 RESET = "\033[0m"
-
+CYCLES = 0
 # Define runtime limit for GitHub Actions (4 hours and 3 minutes = 14580 seconds)
 RUNTIME_LIMIT_SECONDS = 14760 if IS_GITHUB_ACTIONS else float("inf")
 
@@ -62,13 +57,10 @@ def watchdog(price_monitor_manager):
                     time.sleep(min(ban_expiry_time - current_time, 60))
                 else:
                     logger.error("Main loop hung without ban. Attempting recovery...")
-                    telegram_notifier.notify_error(
-                        "Main Loop Hung", "Main loop appears to be hung without API ban."
-                    )
+                    
             time.sleep(10)
         except Exception as e:
             logger.error(f"Watchdog error: {e}", exc_info=True)
-            telegram_notifier.notify_error("Watchdog Error", f"Watchdog failed: {e}")
             time.sleep(10)
 
 def center_text(text, total_width=256):
@@ -105,7 +97,6 @@ def main():
         watchdog_thread.start()
     except Exception as e:
         logger.error(f"Error starting watchdog thread: {e}", exc_info=True)
-        telegram_notifier.notify_error("Watchdog Failure", f"Failed to start watchdog: {e}")
 
     try:
         logger.info(f"{GREEN}{'=' * 256}{RESET}")
@@ -136,11 +127,9 @@ def main():
         except (ccxt.NetworkError, ccxt.RequestTimeout) as e:
             logger.error(f"Error loading markets: {e}", exc_info=True)
             eur_pairs = []
-            telegram_notifier.notify_error("Market Load Failure", f"Failed to load markets: {e}")
         except Exception as e:
             logger.error(f"Unexpected error loading markets: {e}", exc_info=True)
             eur_pairs = []
-            telegram_notifier.notify_error("Market Load Failure", f"Unexpected error loading markets: {e}")
 
         while True:
             # Check runtime limit for GitHub Actions
@@ -179,13 +168,9 @@ def main():
             except (ccxt.NetworkError, ccxt.RequestTimeout) as e:
                 logger.error(f"Error fetching tickers: {e}", exc_info=True)
                 symbols = eur_pairs[:300]
-                telegram_notifier.notify_error("Ticker Fetch Failure", f"Failed to fetch tickers: {e}")
             except Exception as e:
                 logger.error(f"Unexpected error fetching tickers: {e}", exc_info=True)
                 symbols = eur_pairs[:300]
-                telegram_notifier.notify_error(
-                    "Ticker Fetch Failure", f"Unexpected error fetching tickers: {e}"
-                )
 
             logger.info(f"Processing {GREEN}{len(symbols)}{RESET} EUR symbols")
 
@@ -217,28 +202,18 @@ def main():
                             logger.debug(f"Received result for {symbol}")
                         except FutureTimeoutError:
                             logger.error(f"Timeout fetching klines for {symbol}")
-                            telegram_notifier.notify_error(
-                                "Kline Fetch Timeout", f"Timeout fetching klines for {symbol}"
-                            )
                         except (ccxt.NetworkError, ccxt.RequestTimeout) as e:
                             logger.error(
                                 f"Network error fetching klines for {symbol}: {e}",
                                 exc_info=True,
-                            )
-                            telegram_notifier.notify_error(
-                                "Kline Fetch Error", f"Network error for {symbol}: {e}"
                             )
                         except Exception as e:
                             logger.error(
                                 f"Unexpected error fetching klines for {symbol}: {e}",
                                 exc_info=True,
                             )
-                            telegram_notifier.notify_error(
-                                "Kline Fetch Error", f"Unexpected error for {symbol}: {e}"
-                            )
             except Exception as e:
                 logger.error(f"Error in ThreadPoolExecutor: {e}", exc_info=True)
-                telegram_notifier.notify_error("Executor Failure", f"ThreadPoolExecutor error: {e}")
 
             if all_data:
                 try:
@@ -266,9 +241,6 @@ def main():
                     logger.error(
                         f"Unexpected error processing data: {e}", exc_info=True
                     )
-                    telegram_notifier.notify_error(
-                        "Data Processing Error", f"Unexpected error processing data: {e}"
-                    )
                     continue
 
                 try:
@@ -277,7 +249,6 @@ def main():
                     )
                 except Exception as e:
                     logger.error(f"Error analyzing data: {e}", exc_info=True)
-                    telegram_notifier.notify_error("Data Analysis Error", f"Error analyzing data: {e}")
                     continue
 
                 try:
@@ -290,22 +261,20 @@ def main():
                     )
                 except Exception as e:
                     logger.error(f"Error managing portfolio: {e}", exc_info=True)
-                    telegram_notifier.notify_error("Portfolio Management Error", f"Error managing portfolio: {e}")
 
                 try:
                     save_portfolio()
+                    CYCLES += 1
+
+                    if CYCLES > 60:
+                        CYCLES = 0
+                        send_portfolio()  # Send portfolio update after saving
                 except Exception as e:
                     logger.error(f"Error saving portfolio: {e}", exc_info=True)
-                    telegram_notifier.notify_error(
-                        "Portfolio Save Failure", f"Failed to save portfolio: {e}"
-                    )
 
                 try:
                     if not portfolio_lock.acquire(timeout=5):
                         logger.error("Timeout acquiring portfolio lock")
-                        telegram_notifier.notify_error(
-                            "Portfolio Lock Failure", "Failed to acquire portfolio lock"
-                        )
                         continue
                     try:
                         total_value = portfolio["cash"] + sum(
@@ -323,9 +292,6 @@ def main():
                     logger.error(
                         f"Error calculating portfolio value: {e}", exc_info=True
                     )
-                    telegram_notifier.notify_error(
-                        "Portfolio Value Error", f"Error calculating portfolio value: {e}"
-                    )
 
                 try:
                     portfolio_path = (
@@ -338,28 +304,17 @@ def main():
                     print_portfolio(portfolio_path)
                 except FileNotFoundError as e:
                     logger.error(f"Portfolio file error: {e}", exc_info=True)
-                    telegram_notifier.notify_error("Portfolio File Error", f"Portfolio file error: {e}")
                 except Exception as e:
                     logger.error(
                         f"Unexpected error printing portfolio: {e}", exc_info=True
                     )
-                    telegram_notifier.notify_error(
-                        "Portfolio Print Error", f"Unexpected error printing portfolio: {e}"
-                    )
             else:
                 logger.warning("No data collected in this cycle.")
-                telegram_notifier.notify_error(
-                    "No Data Collected", "No data collected in this cycle."
-                )
 
             try:
                 if not portfolio_lock.acquire(timeout=5):
                     logger.error(
                         "Timeout acquiring portfolio lock for monitor management"
-                    )
-                    telegram_notifier.notify_error(
-                        "Monitor Lock Failure",
-                        "Failed to acquire lock for monitor management",
                     )
                     continue
                 try:
@@ -373,9 +328,6 @@ def main():
                                 logger.error(
                                     f"Error stopping monitor for {symbol}: {e}",
                                     exc_info=True,
-                                )
-                                telegram_notifier.notify_error(
-                                    "Monitor Stop Error", f"Error stopping monitor for {symbol}: {e}"
                                 )
                     for symbol in active_assets:
                         if (
@@ -391,23 +343,16 @@ def main():
                                     f"Error starting monitor for {symbol}: {e}",
                                     exc_info=True,
                                 )
-                                telegram_notifier.notify_error(
-                                    "Monitor Start Error", f"Error starting monitor for {symbol}: {e}"
-                                )
                 finally:
                     portfolio_lock.release()
             except Exception as e:
                 logger.error(f"Error managing price monitors: {e}", exc_info=True)
-                telegram_notifier.notify_error(
-                    "Price Monitor Management Error", f"Error managing price monitors: {e}"
-                )
 
             try:
                 from .state import save_state
                 save_state()
             except Exception as e:
                 logger.error(f"Error saving state: {e}", exc_info=True)
-                telegram_notifier.notify_error("State Save Failure", f"Failed to save state: {e}")
 
             elapsed_time = time.time() - last_cycle_time
             sleep_time = max(0, config.config.LOOP_INTERVAL_SECONDS - elapsed_time)
@@ -428,20 +373,12 @@ def main():
         perform_shutdown(price_monitor_manager)
     except Exception as e:
         logger.error(f"Critical error in main loop: {e}", exc_info=True)
-        telegram_notifier.notify_error("Critical Failure", f"Main loop crashed: {e}")
         perform_shutdown(price_monitor_manager)
         sys.exit(1)
 
 def perform_shutdown(price_monitor_manager):
     """Handles graceful shutdown of the bot."""
-    try:
-        asyncio.run_coroutine_threadsafe(
-            telegram_notifier.stop(), asyncio.get_event_loop()
-        )
-    except Exception as e:
-        logger.error(
-            f"Error stopping Telegram notifier during shutdown: {e}", exc_info=True
-        )
+  
     try:
         price_monitor_manager.stop_all()
     except Exception as e:
@@ -462,7 +399,7 @@ def perform_shutdown(price_monitor_manager):
         sys.exit(0)
 
 def send_alert(subject, message):
-    telegram_notifier.notify_error(subject, message)
+    logger.info(message)
 
 if __name__ == "__main__":
     main()
