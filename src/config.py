@@ -112,9 +112,9 @@ class Config:
             "PARQUET_FILENAME", "bitvavo_1min_candles_eur.parquet"
         )
         self.PRICE_INCREASE_THRESHOLD = float(
-            os.getenv("PRICE_INCREASE_THRESHOLD", 0.75)
+            os.getenv("PRICE_INCREASE_THRESHOLD", 0.15)
         )
-        self.MIN_VOLUME_EUR = float(os.getenv("MIN_VOLUME_EUR", 2000))
+        self.MIN_VOLUME_EUR = float(os.getenv("MIN_VOLUME_EUR", 1000))
         self.PORTFOLIO_VALUE = float(os.getenv("PORTFOLIO_VALUE", 10000))
         self.ALLOCATION_PER_TRADE = float(os.getenv("ALLOCATION_PER_TRADE", 0.1))
         self.BUY_FEE = float(os.getenv("BUY_FEE", 0.0015))
