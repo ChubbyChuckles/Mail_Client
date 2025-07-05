@@ -14,11 +14,15 @@ on:
   pull_request:
     branches:
       - github
-
+      
+concurrency:
+  group: trading-bot-${{ github.ref }}
+  cancel-in-progress: true
+  
 jobs:
   trading-bot:
     runs-on: ubuntu-latest
-    timeout-minutes: 242  # 4 hours and 3 minutes
+    timeout-minutes: 246  # 4 hours and 3 minutes
 
     steps:
       # Checkout the repository (github branch)
