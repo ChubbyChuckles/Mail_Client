@@ -9,14 +9,14 @@ on:
   # Run on push to the 'github' branch
   push:
     branches:
-      - github
+      - market-analysis
   # Run on pull requests targeting the 'github' branch
   pull_request:
     branches:
-      - github
+      - market-analysis
       
 concurrency:
-  group: trading-bot-${{ github.ref }}
+  group: trading-bot-${{ market-analysis.ref }}
   cancel-in-progress: true
   
 jobs:
@@ -29,7 +29,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          ref: github
+          ref: market-analysis
 
       # Restore artifacts from the previous run (if available)
       - name: Restore previous artifacts
