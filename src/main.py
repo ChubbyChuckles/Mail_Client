@@ -146,7 +146,7 @@ def main():
             # Check runtime limit for GitHub Actions
             if IS_GITHUB_ACTIONS and time.time() - start_time >= RUNTIME_LIMIT_SECONDS:
                 logger.info(
-                    "Reached 4-hour 3-minute runtime limit in GitHub Actions. Initiating shutdown..."
+                    "Reached 4-hour 15-minute runtime limit in GitHub Actions. Initiating shutdown..."
                 )
                 break
 
@@ -231,6 +231,7 @@ def main():
             if all_data:
                 try:
                     combined_df = pd.concat(all_data, ignore_index=True)
+                    # logger.info(combined_df)
                     logger.debug(
                         f"Combined DataFrame has {len(combined_df)} rows, with {combined_df['symbol'].nunique()} unique symbols"
                     )
