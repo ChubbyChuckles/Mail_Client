@@ -182,6 +182,13 @@ class Config:
         self.MIN_PERCENT_CHANGE = self.parse_float_env("MIN_PERCENT_CHANGE", -0.01)  # Minimum percentage change (0.5%)
         self.MAX_PERCENT_CHANGE = self.parse_float_env("MAX_PERCENT_CHANGE", 0.01)  # Maximum percentage change (5.0%)
 
+        self.ENABLE_CANDLESTICK_PLOTS = bool(os.getenv("ENABLE_CANDLESTICK_PLOTS", False))  # Toggle candlestick plotting
+        self.MAX_MINUTES_SINCE_PEAK = self.parse_float_env("MAX_MINUTES_SINCE_PEAK", 30.0)   # Max minutes since peak
+        self.MIN_PEAK_DROP_PERCENT = self.parse_float_env("MIN_PEAK_DROP_PERCENT", -1.0)    # Min drop from peak (e.g., -1%)
+
+        self.MAX_UNREALIZED_LOSS_PERCENT = self.parse_float_env("MAX_UNREALIZED_LOSS_PERCENT", -1.0)  # Max loss before sell (-1%)
+        self.MIN_PROFIT_PERCENT = self.parse_float_env("MIN_PROFIT_PERCENT", 2.0)        # Min profit to hold for higher gains (2%)
+
         if self.MAX_ACTIVE_ASSETS < 1:
             logger.warning(
                 f"MAX_ACTIVE_ASSETS is {self.MAX_ACTIVE_ASSETS}, must be >= 1. Setting to 7."
