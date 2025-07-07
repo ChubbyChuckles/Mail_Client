@@ -33,7 +33,7 @@ def colorize_value(value, column):
             else:
                 return f"{RED}{value:>7.3f}%{RESET}"
         elif column == "percent_change":
-            if value > config.config.PRICE_INCREASE_THRESHOLD:
+            if config.config.MIN_PERCENT_CHANGE <= value <= config.config.MAX_PERCENT_CHANGE:
                 return f"{GREEN}{value:>6.3f}%{RESET}"
             else:
                 return f"{RED}{value:>6.3f}%{RESET}"
@@ -77,7 +77,7 @@ def calculate_order_book_metrics_with_retry(market, amount_quote, price_range_pe
 
 def verify_and_analyze_data(df, price_monitor_manager):
     """
-    Verifies and analyzes OHLCV data to identify assets with significant price increases and volume.
+    Verifies and analyzes OHLCV data to identify assets within the specified percentage change range.
 
     Args:
         df (pandas.DataFrame): DataFrame with OHLCV data and 'symbol' column.
@@ -85,9 +85,9 @@ def verify_and_analyze_data(df, price_monitor_manager):
 
     Returns:
         tuple: (above_threshold_data, percent_changes, order_book_metrics_list)
-            - above_threshold_data (list): List of dictionaries for assets meeting thresholds.
+            - above_threshold_data (list): List of dictionaries for assets within the percentage change range.
             - percent_changes (pandas.DataFrame): DataFrame with price changes and OHLCV data.
-            - order_book_metrics_list (list): List of order book metrics for relevant coins.
+            - order_book_metrics_list (list): List of order book metrics for filtered coins.
 
     Raises:
         ValueError: If input data is invalid or missing required columns.
@@ -139,18 +139,16 @@ def verify_and_analyze_data(df, price_monitor_manager):
             logger.error(f"Error computing percent changes: {e}", exc_info=True)
             return [], pd.DataFrame(), []
 
-        above_threshold = percent_changes[
-            (
-                percent_changes["percent_change"]
-                >= config.config.PRICE_INCREASE_THRESHOLD
-            )
-            & (percent_changes["volume_eur"] >= config.config.MIN_VOLUME_EUR)
+        # Filter coins within MIN_PERCENT_CHANGE and MAX_PERCENT_CHANGE
+        filtered_coins = percent_changes[
+            (percent_changes["percent_change"] >= config.config.MIN_PERCENT_CHANGE) &
+            (percent_changes["percent_change"] <= config.config.MAX_PERCENT_CHANGE)
         ]
 
         order_book_metrics_list = []
 
-        # Calculate order book metrics for coins above threshold
-        for _, row in above_threshold.iterrows():
+        # Calculate order book metrics for filtered coins
+        for _, row in filtered_coins.iterrows():
             symbol = row["symbol"]
             try:
                 if not semaphore.acquire(timeout=5):
@@ -163,8 +161,7 @@ def verify_and_analyze_data(df, price_monitor_manager):
                     check_rate_limit(1)
                     metrics = calculate_order_book_metrics_with_retry(
                         market=symbol.replace("/", "-"),
-                        amount_quote=portfolio["cash"]
-                        * config.config.ALLOCATION_PER_TRADE,
+                        amount_quote=portfolio["cash"] * config.config.ALLOCATION_PER_TRADE,
                         price_range_percent=config.config.PRICE_RANGE_PERCENT,
                     )
                     metrics["bought"] = False
@@ -182,13 +179,16 @@ def verify_and_analyze_data(df, price_monitor_manager):
                     exc_info=True,
                 )
 
-        if not above_threshold.empty:
+        # Log filtered coins
+        if not filtered_coins.empty:
             logger.info(
-                f"{BRIGHT_BLUE}DATA GATHERING: Coins with price increase >= {config.config.PRICE_INCREASE_THRESHOLD}% "
-                f"and volume >= €{config.config.MIN_VOLUME_EUR}:   "
-                f"(only Buy if Total Score > {config.config.MIN_TOTAL_SCORE} and Slippage Buy < {config.config.MAX_SLIPPAGE_BUY}%){RESET}"
+                f"{BRIGHT_BLUE}DATA GATHERING: Coins with price increase between {config.config.MIN_PERCENT_CHANGE:.2f}% "
+                f"and {config.config.MAX_PERCENT_CHANGE:.2f}%{RESET}"
             )
-            for _, row in above_threshold.iterrows():
+            logger.info(
+                f"{YELLOW}(only Buy if Total Score > {config.config.MIN_TOTAL_SCORE} and Slippage Buy < {config.config.MAX_SLIPPAGE_BUY}%){RESET}"
+            )
+            for _, row in filtered_coins.iterrows():
                 try:
                     symbol = row["symbol"]
                     metrics = next(
@@ -218,84 +218,19 @@ def verify_and_analyze_data(df, price_monitor_manager):
                     logger.error(
                         f"Error logging data for {row['symbol']}: {e}", exc_info=True
                     )
-
         else:
             logger.info(
-                f"{BRIGHT_BLUE}DATA GATHERING: No coins with price increase >= {config.config.PRICE_INCREASE_THRESHOLD}% "
-                f"and trade volume >= {config.config.MIN_VOLUME_EUR} €   "
-                f"(only Buy if Total Score > {config.config.MIN_TOTAL_SCORE} and Slippage Buy < {config.config.MAX_SLIPPAGE_BUY}%){RESET}"
+                f"{BRIGHT_BLUE}DATA GATHERING: No coins with price increase between {config.config.MIN_PERCENT_CHANGE:.2f}% "
+                f"and {config.config.MAX_PERCENT_CHANGE:.2f}%{RESET}"
             )
 
-        below_threshold = percent_changes[
-            percent_changes["percent_change"] < config.config.PRICE_INCREASE_THRESHOLD
-        ]
-        if not below_threshold.empty:
-            try:
-                top_5_below = below_threshold.sort_values(
-                    by="percent_change", ascending=False
-                ).head(5)
-                logger.info(
-                    f"{BRIGHT_BLUE}DATA GATHERING: Top 5 coins with price increase < {config.config.PRICE_INCREASE_THRESHOLD}% "
-                    f"or trade volume < {config.config.MIN_VOLUME_EUR} €:{RESET}"
-                )
-                for _, row in top_5_below.iterrows():
-                    symbol = row["symbol"]
-                    try:
-                        if not semaphore.acquire(timeout=5):
-                            logger.error(f"Timeout acquiring semaphore for {symbol}")
-                            send_alert(
-                                "Semaphore Failure",
-                                f"Failed to acquire semaphore for {symbol}",
-                            )
-                            continue
-                        try:
-                            check_rate_limit(1)
-                            metrics = calculate_order_book_metrics_with_retry(
-                                market=symbol.replace("/", "-"),
-                                amount_quote=portfolio["cash"]
-                                * config.config.ALLOCATION_PER_TRADE,
-                                price_range_percent=config.config.PRICE_RANGE_PERCENT,
-                            )
-                            metrics["bought"] = False
-                            order_book_metrics_list.append(metrics)
-                        finally:
-                            semaphore.release()
-                        logger.info(
-                            f"Symbol: {colorize_value(row['symbol'], 'symbol')}  "
-                            f"Change: {colorize_value(row['percent_change'], 'percent_change')}  "
-                            f"Volume: {colorize_value(row['volume_eur'], 'volume_eur')}  "
-                            f"Open: {row['open_price']:>15.8f}  "
-                            f"Close: {row['close_price']:>15.8f}  "
-                            f"Slippage Buy: {colorize_value(metrics.get('slippage_buy', 0), 'slippage_buy')}  "
-                            f"Slippage Sell: {colorize_value(metrics.get('slippage_sell', 0), 'slippage_sell')}  "
-                            f"Total Score: {metrics.get('total_score', 0):>4.2f}  "
-                            f"Recommendation: {colorize_value(metrics.get('recommendation', 'N/A'), 'recommendation')}  "
-                            f"Latest Timestamp: {row['latest_timestamp']}"
-                        )
-                    except (ccxt.NetworkError, ccxt.RequestTimeout) as e:
-                        logger.error(
-                            f"Network error calculating order book metrics for {symbol}: {e}",
-                            exc_info=True,
-                        )
-                    except Exception as e:
-                        logger.error(
-                            f"Unexpected error processing {symbol}: {e}", exc_info=True
-                        )
-            except Exception as e:
-                logger.error(
-                    f"Error processing below-threshold coins: {e}", exc_info=True
-                )
-        else:
-            logger.info(
-                f"No coins with price increase < {config.config.PRICE_INCREASE_THRESHOLD}%"
-            )
-
+        # Update low volatility assets
         try:
             if not portfolio_lock.acquire(timeout=5):
                 logger.error("Timeout acquiring portfolio lock")
                 send_alert("Portfolio Lock Failure", "Failed to acquire portfolio lock")
                 return (
-                    above_threshold.to_dict("records"),
+                    filtered_coins.to_dict("records"),
                     percent_changes,
                     order_book_metrics_list,
                 )
@@ -331,7 +266,7 @@ def verify_and_analyze_data(df, price_monitor_manager):
             logger.error(f"Error managing low volatility assets: {e}", exc_info=True)
 
         return (
-            above_threshold.to_dict("records"),
+            filtered_coins.to_dict("records"),
             percent_changes,
             order_book_metrics_list,
         )

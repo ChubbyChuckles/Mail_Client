@@ -611,6 +611,7 @@ def manage_portfolio(
         if not isinstance(percent_changes, pd.DataFrame) or not {
             "symbol",
             "close_price",
+            "percent_change",
         }.issubset(percent_changes.columns):
             raise ValueError("Invalid percent_changes DataFrame")
         if not price_monitor_manager:
@@ -630,9 +631,6 @@ def manage_portfolio(
             if combined_df is not None
             else 0.5
         )
-        # logger.info(
-        #     f"Market bullish indicator: {bullish_indicator:.2f} (threshold: {config.config.MIN_BULLISH_INDICATOR:.2f})"
-        # )
         if bullish_indicator < config.config.MIN_BULLISH_INDICATOR:
             logger.info(
                 f"Skipping buy decisions: Bullish indicator {bullish_indicator:.2f} below threshold {config.config.MIN_BULLISH_INDICATOR:.2f}"
@@ -963,15 +961,11 @@ def manage_portfolio(
                         f"Holding: {holding_minutes:.2f} min"
                     )
 
+            # Filter above_threshold_data by percentage change
+            filtered_threshold_data = above_threshold_data
+
             # Buy new assets and update order book metrics
-            for record in above_threshold_data:
-                if (
-                    not isinstance(record, dict)
-                    or "symbol" not in record
-                    or "close_price" not in record
-                ):
-                    logger.warning(f"Invalid record in above_threshold_data: {record}")
-                    continue
+            for record in filtered_threshold_data:
                 symbol = record["symbol"]
                 total_score = 0.0
                 slippage_buy = 0.0
@@ -1176,9 +1170,7 @@ def manage_portfolio(
                         f"Bought {quantity:.4f} {symbol} at {purchase_price:.4f} EUR (close {close_price:.4f}) "
                         f"for {actual_cost:.2f} EUR (after {slippage_buy:.2f}% slippage and {buy_fee:.2f} fee), "
                         f"Trade Count: {trade_count}, Largest Trade Volume EUR: €{largest_trade_volume_eur:.2f}, "
-                        f"RSI: {rsi:.2f}"
-                        if rsi is not None
-                        else ""
+                        f"RSI: {rsi:.2f}" if rsi is not None else ""
                     )
                     for metrics in order_book_metrics_list:
                         if metrics.get("market") == symbol.replace("/", "-"):
@@ -1280,7 +1272,6 @@ def manage_portfolio(
     logger.info(
         f"Portfolio: Cash: {portfolio.get('cash', 0):.2f} EUR, Assets: {len(portfolio.get('assets', {}))}, Total Value: {total_portfolio_value:.2f} EUR"
     )
-
 
 def send_alert(subject, message):
     """

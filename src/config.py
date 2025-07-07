@@ -179,6 +179,8 @@ class Config:
         self.BOLLINGER_STD_DEV = self.parse_float_env("BOLLINGER_STD_DEV", 2.0)
 
         self.MIN_BULLISH_INDICATOR = self.parse_float_env("MIN_BULLISH_INDICATOR", 0.7) # Default 0.6
+        self.MIN_PERCENT_CHANGE = self.parse_float_env("MIN_PERCENT_CHANGE", -0.01)  # Minimum percentage change (0.5%)
+        self.MAX_PERCENT_CHANGE = self.parse_float_env("MAX_PERCENT_CHANGE", 0.01)  # Maximum percentage change (5.0%)
 
         if self.MAX_ACTIVE_ASSETS < 1:
             logger.warning(
