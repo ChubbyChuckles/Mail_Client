@@ -67,14 +67,6 @@ def fetch_trade_details_with_retry(symbol, start_time, end_time):
 def calculate_bollinger_bands(close_prices, period=20, std_dev=2):
     """
     Calculate Bollinger Bands for given closing prices.
-
-    Args:
-        close_prices (np.array): Array of closing prices.
-        period (int): Period for the moving average (default: 20).
-        std_dev (float): Standard deviation multiplier (default: 2).
-
-    Returns:
-        tuple: (middle_band, upper_band, lower_band) as floats, or None if calculation fails.
     """
     try:
         if len(close_prices) < period:
@@ -106,26 +98,8 @@ def sell_asset(
 ):
     """
     Sells a specified asset and updates the portfolio.
-
-    Args:
-        symbol (str): Asset symbol.
-        asset (dict): Asset details.
-        current_price (float): Current price of the asset.
-        portfolio (dict): Portfolio state.
-        portfolio_lock (Lock): Thread lock for portfolio updates.
-        finished_trades (list): List to append finished trade record.
-        reason (str): Reason for selling.
-        price_monitor_manager: Instance of PriceMonitorManager.
-        sell_slippage (float): Slippage percentage for selling (default: 0.0).
-
-    Returns:
-        dict or None: Finished trade details if sold, else None.
-
-    Raises:
-        ValueError: If inputs are invalid.
     """
     try:
-        # Input validation
         if not isinstance(symbol, str) or not symbol:
             raise ValueError(f"Invalid symbol: {symbol}")
         if not isinstance(asset, dict) or not all(
@@ -181,7 +155,6 @@ def sell_asset(
         finally:
             portfolio_lock.release()
 
-        # Post-sale actions
         try:
             if price_monitor_manager:
                 price_monitor_manager.stop(symbol)
@@ -223,20 +196,6 @@ def sell_most_profitable_asset(
 ):
     """
     Sells the most profitable asset to free up a portfolio slot.
-
-    Args:
-        portfolio (dict): Portfolio dictionary.
-        portfolio_lock (Lock): Thread lock for portfolio updates.
-        percent_changes (pandas.DataFrame): DataFrame with price changes.
-        finished_trades (list): List to append finished trade record.
-        price_monitor_manager: Instance of PriceMonitorManager.
-        sell_slippages (dict): Dictionary of sell slippages for each asset (default: None).
-
-    Returns:
-        dict or None: Finished trade details if sold, else None.
-
-    Raises:
-        ValueError: If inputs are invalid.
     """
     try:
         if not isinstance(portfolio, dict) or "assets" not in portfolio:
@@ -257,21 +216,9 @@ def sell_most_profitable_asset(
             return None
 
         try:
-            current_time = datetime.utcnow()
-            profitable_assets = [
-                (symbol, asset)
-                for symbol, asset in portfolio["assets"].items()
-                if isinstance(asset.get("purchase_time"), datetime)
-                and (current_time - asset["purchase_time"]).total_seconds() / 60
-                >= config.config.MIN_HOLDING_MINUTES
-            ]
-            if not profitable_assets:
-                logger.info("No profitable assets eligible for sale to free up slot.")
-                return None
-
             max_profit = -float("inf")
             asset_to_sell = None
-            for symbol, asset in profitable_assets:
+            for symbol, asset in portfolio["assets"].items():
                 current_price_series = percent_changes[
                     percent_changes["symbol"] == symbol
                 ]["close_price"]
@@ -343,11 +290,6 @@ def sell_most_profitable_asset(
 def save_portfolio():
     """
     Saves the current portfolio state to a JSON file and maintains only the 3 latest backup files atomically.
-    In GitHub Actions, skips backup file creation to reduce disk usage.
-
-    Raises:
-        ValueError: If portfolio data is invalid.
-        OSError: For file operation errors.
     """
     try:
         if (
@@ -387,7 +329,6 @@ def save_portfolio():
             shutil.move(temp_file.name, file_path)
             logger.info(f"Saved portfolio to {file_path}")
 
-            # Save to backup file, but skip in GitHub Actions to reduce disk usage
             if not IS_GITHUB_ACTIONS:
                 backup_file = (
                     f"{file_path}.backup_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}"
@@ -401,7 +342,6 @@ def save_portfolio():
                 shutil.move(temp_file.name, backup_file)
                 logger.info(f"Saved portfolio backup to {backup_file}")
 
-                # Manage backup files: keep only the 3 latest
                 backup_files = glob.glob(f"{file_path}.backup_*")
                 backup_files.sort(key=lambda x: x.split("backup_")[-1], reverse=True)
                 for old_file in backup_files[3:]:
@@ -414,7 +354,6 @@ def save_portfolio():
                             exc_info=True,
                         )
 
-            # In GitHub Actions, log file creation for artifact tracking
             if IS_GITHUB_ACTIONS:
                 logger.info(
                     f"Portfolio file saved at {file_path} for artifact collection"
@@ -444,13 +383,6 @@ def save_portfolio():
 def calculate_bullish_indicator(combined_df, time_window_minutes=10):
     """
     Calculate a bullish market indicator for the last 10 minutes using combined_df.
-
-    Args:
-        combined_df (pandas.DataFrame): DataFrame with OHLCV data for multiple symbols.
-        time_window_minutes (int): Time window for analysis (default: 10).
-
-    Returns:
-        float: Bullish indicator (0.0 to 1.0), or 0.5 if insufficient data.
     """
     try:
         if not isinstance(combined_df, pd.DataFrame) or not {
@@ -465,13 +397,11 @@ def calculate_bullish_indicator(combined_df, time_window_minutes=10):
             logger.error("Invalid combined_df structure for bullish indicator calculation")
             return 0.5
 
-        # Ensure timestamps are in UTC
         if combined_df["timestamp"].dt.tz is not None:
             logger.warning("combined_df timestamps are timezone-aware. Converting to UTC.")
             combined_df = combined_df.copy()
             combined_df["timestamp"] = combined_df["timestamp"].dt.tz_convert("UTC").dt.tz_localize(None)
 
-        # Filter for the last 10 minutes
         current_time = datetime.utcnow()
         start_time = current_time - timedelta(minutes=time_window_minutes)
         df_latest = combined_df[combined_df["timestamp"] >= start_time].copy()
@@ -490,21 +420,18 @@ def calculate_bullish_indicator(combined_df, time_window_minutes=10):
             logger.warning("No data available even in 15-minute window. Returning neutral indicator.")
             return 0.5
 
-        # Calculate price change and volatility
         df_latest["price_change_pct"] = (
             (df_latest["close"] - df_latest["open"]) / df_latest["open"] * 100
         )
-        # Alternative VWPM calculation using close-to-previous-close
         df_latest = df_latest.sort_values(["symbol", "timestamp"])
         df_latest["prev_close"] = df_latest.groupby("symbol")["close"].shift(1)
         df_latest["price_change_prev_pct"] = (
             (df_latest["close"] - df_latest["prev_close"]) / df_latest["prev_close"] * 100
-        ).fillna(df_latest["price_change_pct"])  # Fallback to open-close if no previous close
+        ).fillna(df_latest["price_change_pct"])
         df_latest["volatility"] = (
             (df_latest["high"] - df_latest["low"]) / df_latest["open"] * 100
         )
 
-        # Aggregate by symbol
         df_agg = (
             df_latest.groupby("symbol")
             .agg({
@@ -516,8 +443,6 @@ def calculate_bullish_indicator(combined_df, time_window_minutes=10):
             .reset_index()
         )
 
-        # Calculate sentiment metrics
-        # 1. Market Breadth Index (MBI)
         df_agg["abs_price_change"] = df_agg["price_change_pct"].abs()
         mbi = (
             df_agg[df_agg["price_change_pct"] > 0]["abs_price_change"].sum()
@@ -526,7 +451,6 @@ def calculate_bullish_indicator(combined_df, time_window_minutes=10):
             else 0.5
         )
 
-        # 2. Volume-Weighted Price Momentum (VWPM)
         df_agg["volume_weighted_change"] = df_agg["price_change_prev_pct"] * df_agg["volume"]
         vwpm = (
             df_agg["volume_weighted_change"].sum() / df_agg["volume"].sum()
@@ -534,13 +458,11 @@ def calculate_bullish_indicator(combined_df, time_window_minutes=10):
             else 0.0
         )
 
-        # 3. Volatility-Adjusted Sentiment (VAS)
         df_agg["normalized_change"] = df_agg["price_change_pct"] / df_agg[
             "volatility"
         ].replace(0, 1)
         vas = df_agg["normalized_change"].mean()
 
-        # 4. Advance/Decline Ratio
         advancers = len(df_agg[df_agg["price_change_pct"] > 0])
         decliners = len(df_agg[df_agg["price_change_pct"] < 0])
         ad_ratio = (
@@ -549,7 +471,6 @@ def calculate_bullish_indicator(combined_df, time_window_minutes=10):
             else float("inf") if advancers > 0 else 0.0
         )
 
-        # 5. Volume Ratio
         bullish_volume = df_agg[df_agg["price_change_pct"] > 0]["volume"].sum()
         bearish_volume = df_agg[df_agg["price_change_pct"] < 0]["volume"].sum()
         volume_ratio = (
@@ -558,7 +479,6 @@ def calculate_bullish_indicator(combined_df, time_window_minutes=10):
             else float("inf") if bullish_volume > 0 else 0.0
         )
 
-        # Combine sentiment scores
         sentiment_scores = [
             mbi > 0.5,
             vwpm > 0,
@@ -575,7 +495,6 @@ def calculate_bullish_indicator(combined_df, time_window_minutes=10):
             f"VAS: {vas:.2f}, AD Ratio: {ad_ratio:.2f}, Volume Ratio: {volume_ratio:.2f})"
         )
         return bullish_indicator
-
     except Exception as e:
         logger.error(f"Error calculating bullish indicator: {e}", exc_info=True)
         send_alert("Bullish Indicator Failure", f"Error calculating bullish indicator: {e}")
@@ -611,6 +530,7 @@ def manage_portfolio(
         if not isinstance(percent_changes, pd.DataFrame) or not {
             "symbol",
             "close_price",
+            "percent_change",
         }.issubset(percent_changes.columns):
             raise ValueError("Invalid percent_changes DataFrame")
         if not price_monitor_manager:
@@ -630,9 +550,6 @@ def manage_portfolio(
             if combined_df is not None
             else 0.5
         )
-        # logger.info(
-        #     f"Market bullish indicator: {bullish_indicator:.2f} (threshold: {config.config.MIN_BULLISH_INDICATOR:.2f})"
-        # )
         if bullish_indicator < config.config.MIN_BULLISH_INDICATOR:
             logger.info(
                 f"Skipping buy decisions: Bullish indicator {bullish_indicator:.2f} below threshold {config.config.MIN_BULLISH_INDICATOR:.2f}"
@@ -680,7 +597,7 @@ def manage_portfolio(
 
         if not portfolio_lock.acquire(timeout=5):
             logger.error("Timeout acquiring portfolio lock")
-            send_alert("Portfolio Lock Failure", "Failed to acquire portfolio lock")
+            send_alert("Portfolio Lock Failure", "Timeout acquiring portfolio lock")
             return
 
         try:
@@ -709,11 +626,7 @@ def manage_portfolio(
                     symbol
                     for symbol, asset in portfolio.get("assets", {}).items()
                     if asset.get("current_price", 0)
-                    > asset.get("purchase_price", 0) * 1.01
-                    and isinstance(asset.get("purchase_time"), datetime)
-                    and (datetime.utcnow() - asset["purchase_time"]).total_seconds()
-                    / 60
-                    >= config.config.MIN_HOLDING_MINUTES
+                    > asset.get("purchase_price", 0) * (1 + config.config.MIN_PROFIT_PERCENT / 100)
                 ]
                 if profitable_assets:
                     for symbol in profitable_assets:
@@ -818,7 +731,7 @@ def manage_portfolio(
                 )
                 if (
                     len(portfolio.get("assets", {})) >= config.config.ASSET_THRESHOLD
-                    and current_price > purchase_price * 1.01
+                    and current_price > purchase_price * (1 + config.config.MIN_PROFIT_PERCENT / 100)
                 ):
                     profit_target = min(
                         profit_target, config.config.ADJUSTED_PROFIT_TARGET
@@ -855,7 +768,7 @@ def manage_portfolio(
                     ((current_price * asset["quantity"]) - total_cost) / total_cost
                     if total_cost > 0
                     else 0
-                )
+                ) * 100  # Convert to percentage
                 trailing_loss = (
                     (highest_price - current_price) / highest_price
                     if highest_price > purchase_price
@@ -872,8 +785,8 @@ def manage_portfolio(
                     min(sell_prices) if sell_prices else profit_target_price
                 )
                 catastrophic_loss = (
-                    unrealized_profit <= config.config.CAT_LOSS_THRESHOLD
-                    and abs(unrealized_profit) > 2 * atr / purchase_price
+                    unrealized_profit <= config.config.CAT_LOSS_THRESHOLD * 100
+                    and abs(unrealized_profit) > 2 * atr / purchase_price * 100
                     if atr > 0 and purchase_price > 0
                     else False
                 )
@@ -883,44 +796,66 @@ def manage_portfolio(
                 )
                 multiplied_profit_target = (
                     unrealized_profit
-                    >= config.config.PROFIT_TARGET_MULTIPLIER * profit_target
+                    >= config.config.PROFIT_TARGET_MULTIPLIER * profit_target * 100
                 )
-                regular_sell_signal = (
-                    holding_minutes >= config.config.MIN_HOLDING_MINUTES
+
+                # Initialize reached_min_profit if not set
+                if "reached_min_profit" not in asset:
+                    asset["reached_min_profit"] = False
+
+                # Update reached_min_profit
+                if unrealized_profit >= config.config.MIN_PROFIT_PERCENT:
+                    asset["reached_min_profit"] = True
+
+                # New sell signals
+                loss_exceeded = unrealized_profit <= config.config.MAX_UNREALIZED_LOSS_PERCENT
+                dip_below_profit = (
+                    asset["reached_min_profit"]
+                    and unrealized_profit < config.config.MIN_PROFIT_PERCENT
+                )
+                advanced_sell_signal = (
+                    unrealized_profit >= config.config.MIN_PROFIT_PERCENT
                     and (
                         trailing_loss >= trailing_stop
-                        or unrealized_profit >= profit_target
+                        or unrealized_profit >= profit_target * 100
                         or negative_momentum_counts.get(symbol, 0)
                         >= config.config.MOMENTUM_CONFIRM_MINUTES
+                        or multiplied_profit_target
+                        or catastrophic_loss
+                        or time_stop
                     )
                 )
                 sell_slippage = sell_slippages.get(
                     symbol, config.config.MAX_SLIPPAGE_SELL + 0.1
                 )
                 slippage_ok = abs(sell_slippage) <= abs(config.config.MAX_SLIPPAGE_SELL)
-                sell_signal = (
-                    multiplied_profit_target
-                    or regular_sell_signal
-                    or catastrophic_loss
-                    or time_stop
-                ) and slippage_ok
+                sell_signal = (loss_exceeded or dip_below_profit or advanced_sell_signal) and slippage_ok
+
                 if sell_signal:
                     reason = (
-                        "Catastrophic loss"
-                        if catastrophic_loss
+                        "Unrealized loss exceeded"
+                        if loss_exceeded
                         else (
-                            "Time stop"
-                            if time_stop
+                            "Dip below minimum profit"
+                            if dip_below_profit
                             else (
-                                f"Multiplied profit target ({config.config.PROFIT_TARGET_MULTIPLIER}x = {(config.config.PROFIT_TARGET_MULTIPLIER * profit_target)*100:.1f}%)"
-                                if multiplied_profit_target
+                                "Catastrophic loss"
+                                if catastrophic_loss
                                 else (
-                                    "Trailing stop"
-                                    if trailing_loss >= trailing_stop
+                                    "Time stop"
+                                    if time_stop
                                     else (
-                                        f"Dynamic profit target ({profit_target*100:.1f}%)"
-                                        if unrealized_profit >= profit_target
-                                        else "Negative momentum"
+                                        f"Multiplied profit target ({config.config.PROFIT_TARGET_MULTIPLIER}x = {(config.config.PROFIT_TARGET_MULTIPLIER * profit_target)*100:.1f}%)"
+                                        if multiplied_profit_target
+                                        else (
+                                            "Trailing stop"
+                                            if trailing_loss >= trailing_stop
+                                            else (
+                                                f"Dynamic profit target ({profit_target*100:.1f}%)"
+                                                if unrealized_profit >= profit_target * 100
+                                                else "Negative momentum"
+                                            )
+                                        )
                                     )
                                 )
                             )
@@ -930,10 +865,10 @@ def manage_portfolio(
                         f"Evaluation Decision for {symbol}: Selling due to {reason}. "
                         f"Current: {current_price:.4f}, Highest: {highest_price:.4f}, "
                         f"Trailing Loss: {trailing_loss:.4f}, ATR Stop: {trailing_stop:.4f}, "
-                        f"Profit/Loss: {unrealized_profit:.4f}, Profit Target: {profit_target:.4f}, "
+                        f"Unrealized P/L: {unrealized_profit:.2f}%, Profit Target: {profit_target:.4f}, "
                         f"EMA_{ema_period}: {ema_dynamic:.2f}, "
                         f"Holding: {holding_minutes:.2f} min, Neg Momentum Count: {negative_momentum_counts.get(symbol, 0)}, "
-                        f"Sell Slippage: {sell_slippage:.2f}%"
+                        f"Sell Slippage: {sell_slippage:.2f}%, Reached Min Profit: {asset['reached_min_profit']}"
                     )
                     trade = sell_asset(
                         symbol,
@@ -958,20 +893,15 @@ def manage_portfolio(
                         f"Current: {current_price:.4f}, "
                         f"Purchase: {purchase_price:.4f}, "
                         f"Quantity: {asset['quantity']:.4f}, "
-                        f"Unrealized P/L: {unrealized_profit*100:.2f}%, "
+                        f"Unrealized P/L: {unrealized_profit:.2f}%, "
                         f"Sell Slippage: {sell_slippage:.2f}%, "
-                        f"Holding: {holding_minutes:.2f} min"
+                        f"Holding: {holding_minutes:.2f} min, "
+                        f"Reached Min Profit: {asset['reached_min_profit']}"
                     )
 
-            # Buy new assets and update order book metrics
-            for record in above_threshold_data:
-                if (
-                    not isinstance(record, dict)
-                    or "symbol" not in record
-                    or "close_price" not in record
-                ):
-                    logger.warning(f"Invalid record in above_threshold_data: {record}")
-                    continue
+            # Buy new assets (unchanged)
+            filtered_threshold_data = above_threshold_data
+            for record in filtered_threshold_data:
                 symbol = record["symbol"]
                 total_score = 0.0
                 slippage_buy = 0.0
@@ -987,7 +917,6 @@ def manage_portfolio(
                     )
                     continue
 
-                # Calculate RSI if enabled
                 rsi = None
                 if config.config.USE_RSI:
                     if combined_df is None:
@@ -1024,7 +953,6 @@ def manage_portfolio(
                                 f"Insufficient data for RSI calculation for {symbol} ({len(symbol_candles)} candles). Skipping RSI check."
                             )
 
-                # Calculate Bollinger Bands if enabled
                 bollinger_ok = True
                 if config.config.USE_BOLLINGER_BANDS:
                     if combined_df is None:
@@ -1169,6 +1097,7 @@ def manage_portfolio(
                         "original_profit_target": config.config.PROFIT_TARGET,
                         "sell_price": purchase_price
                         * (1 + config.config.PROFIT_TARGET),
+                        "reached_min_profit": False,  # Initialize new flag
                     }
                     portfolio["cash"] -= allocation
                     total_asset_value += quantity * close_price
@@ -1176,9 +1105,7 @@ def manage_portfolio(
                         f"Bought {quantity:.4f} {symbol} at {purchase_price:.4f} EUR (close {close_price:.4f}) "
                         f"for {actual_cost:.2f} EUR (after {slippage_buy:.2f}% slippage and {buy_fee:.2f} fee), "
                         f"Trade Count: {trade_count}, Largest Trade Volume EUR: €{largest_trade_volume_eur:.2f}, "
-                        f"RSI: {rsi:.2f}"
-                        if rsi is not None
-                        else ""
+                        f"RSI: {rsi:.2f}" if rsi is not None else ""
                     )
                     for metrics in order_book_metrics_list:
                         if metrics.get("market") == symbol.replace("/", "-"):
@@ -1253,7 +1180,6 @@ def manage_portfolio(
         send_alert("Portfolio Management Failure", f"Unexpected error: {e}")
         return
 
-    # Save order book metrics to CSV
     try:
         if IS_GITHUB_ACTIONS:
             logger.info("Skip saving order book metrics.")
@@ -1285,9 +1211,5 @@ def manage_portfolio(
 def send_alert(subject, message):
     """
     Sends an alert for critical errors using TelegramNotifier.
-
-    Args:
-        subject (str): The subject of the alert.
-        message (str): The alert message.
     """
     logger.error(message)

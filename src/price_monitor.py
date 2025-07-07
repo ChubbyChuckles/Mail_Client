@@ -162,10 +162,6 @@ class PriceMonitorManager:
                     ban_expiry = handle_ban_error(e)
                     if ban_expiry:
                         wait_until_ban_lifted(ban_expiry)
-                        self.telegram_notifier.notify_error(
-                            "API Ban Detected",
-                            f"API banned for {symbol} until {datetime.utcfromtimestamp(ban_expiry)}.",
-                        )
                         continue
                     logger.error(f"Permission denied for {symbol}: {e}")
                     self.ticker_errors[symbol] = self.ticker_errors.get(symbol, 0) + 1
@@ -173,10 +169,6 @@ class PriceMonitorManager:
                         with portfolio_lock:
                             low_volatility_assets.add(symbol)
                         self.stop(symbol)
-                        self.telegram_notifier.notify_error(
-                            "Monitoring Stopped",
-                            f"Stopped monitoring {symbol} due to repeated ticker errors.",
-                        )
                         break
                     time.sleep(0.1)
                 except Exception as e:
@@ -186,17 +178,10 @@ class PriceMonitorManager:
                         with portfolio_lock:
                             low_volatility_assets.add(symbol)
                         self.stop(symbol)
-                        self.telegram_notifier.notify_error(
-                            "Monitoring Stopped",
-                            f"Stopped monitoring {symbol} due to repeated ticker errors: {e}",
-                        )
                         break
                     time.sleep(0.1)
         except Exception as e:
             logger.error(f"Price monitoring error for {symbol}: {e}", exc_info=True)
-            self.telegram_notifier.notify_error(
-                "Price Monitoring Failure", f"Error monitoring {symbol}: {e}"
-            )
         finally:
             logger.info(f"Stopped price monitoring for {symbol}")
 
@@ -368,7 +353,6 @@ class PriceMonitorManager:
                     from .utils import append_to_finished_trades_csv
 
                     append_to_finished_trades_csv(finished_trade)
-                    self.telegram_notifier.notify_sell_trade(finished_trade)
 
     def start(self, symbol, portfolio, portfolio_lock, candles_df):
         """
@@ -435,10 +419,6 @@ class PriceMonitorManager:
             except Exception as e:
                 logger.error(
                     f"Error stopping price monitor for {symbol}: {e}", exc_info=True
-                )
-                self.telegram_notifier.notify_error(
-                    "Stop Monitor Failure",
-                    f"Error stopping price monitor for {symbol}: {e}",
                 )
             finally:
                 self.threads.pop(symbol, None)
