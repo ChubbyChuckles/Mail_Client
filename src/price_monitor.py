@@ -15,7 +15,7 @@ from .portfolio import sell_asset
 from .state import (ban_expiry_time, is_banned, low_volatility_assets,
                     negative_momentum_counts, weight_used)
 from .utils import calculate_dynamic_ema_period, calculate_ema
-
+from .bitvavo_order_metrics import calculate_order_book_metrics  # Added for slippage
 
 class PriceMonitorManager:
     def __init__(self):
@@ -230,17 +230,17 @@ class PriceMonitorManager:
                 )
                 * atr
                 / purchase_price
-                if atr > 0
+                if atr > 0 and purchase_price > 0
                 else 0.05
             )
             profit_target = (
                 max(0.015, min(0.05, 1.2 * atr / purchase_price))
-                if atr > 0
+                if atr > 0 and purchase_price > 0
                 else asset.get("profit_target", 0.015)
             )
             if (
                 len(portfolio["assets"]) >= config.config.ASSET_THRESHOLD
-                and current_price > purchase_price * 1.01
+                and current_price > purchase_price * (1 + config.config.MIN_PROFIT_PERCENT / 100)
             ):
                 profit_target = min(profit_target, config.config.ADJUSTED_PROFIT_TARGET)
             asset["profit_target"] = profit_target
@@ -272,7 +272,13 @@ class PriceMonitorManager:
                 )
             else:
                 negative_momentum_counts[symbol] = 0
-            unrealized_profit = (current_price - purchase_price) / purchase_price
+            buy_fee = asset.get("buy_fee", 0)
+            total_cost = purchase_price * asset["quantity"] + buy_fee
+            unrealized_profit = (
+                ((current_price * asset["quantity"]) - total_cost) / total_cost
+                if total_cost > 0
+                else 0
+            ) * 100  # Convert to percentage
             trailing_loss = (
                 (highest_price - current_price) / highest_price
                 if highest_price > purchase_price
@@ -289,9 +295,9 @@ class PriceMonitorManager:
                 min(sell_prices) if sell_prices else profit_target_price
             )
             catastrophic_loss = (
-                unrealized_profit <= config.config.CAT_LOSS_THRESHOLD
-                and abs(unrealized_profit) > 2 * atr / purchase_price
-                if atr > 0
+                unrealized_profit <= config.config.CAT_LOSS_THRESHOLD * 100
+                and abs(unrealized_profit) > 2 * atr / purchase_price * 100
+                if atr > 0 and purchase_price > 0
                 else False
             )
             time_stop = (
@@ -300,44 +306,91 @@ class PriceMonitorManager:
             )
             multiplied_profit_target = (
                 unrealized_profit
-                >= config.config.PROFIT_TARGET_MULTIPLIER * profit_target
+                >= config.config.PROFIT_TARGET_MULTIPLIER * profit_target * 100
             )
-            regular_sell_signal = (
-                holding_minutes >= config.config.MIN_HOLDING_MINUTES
+
+            # Initialize reached_min_profit if not set
+            if "reached_min_profit" not in asset:
+                asset["reached_min_profit"] = False
+
+            # Update reached_min_profit
+            if unrealized_profit >= config.config.MIN_PROFIT_PERCENT:
+                asset["reached_min_profit"] = True
+
+            # Calculate sell slippage
+            try:
+                amount_quote = asset["quantity"] * current_price
+                metrics = calculate_order_book_metrics(
+                    symbol.replace("/", "-"), amount_quote=amount_quote
+                )
+                sell_slippage = (
+                    metrics["slippage_sell"]
+                    if "error" not in metrics and metrics.get("slippage_sell") is not None
+                    else config.config.MAX_SLIPPAGE_SELL + 0.1
+                )
+            except Exception as e:
+                logger.error(f"Error calculating sell slippage for {symbol}: {e}", exc_info=True)
+                sell_slippage = config.config.MAX_SLIPPAGE_SELL + 0.1
+
+            # New sell signals
+            loss_exceeded = unrealized_profit <= config.config.MAX_UNREALIZED_LOSS_PERCENT
+            dip_below_profit = (
+                asset["reached_min_profit"]
+                and unrealized_profit < config.config.MIN_PROFIT_PERCENT
+            )
+            advanced_sell_signal = (
+                unrealized_profit >= config.config.MIN_PROFIT_PERCENT
                 and (
                     trailing_loss >= trailing_stop
-                    or unrealized_profit >= profit_target
+                    or unrealized_profit >= profit_target * 100
                     or negative_momentum_counts.get(symbol, 0)
                     >= config.config.MOMENTUM_CONFIRM_MINUTES
+                    or multiplied_profit_target
+                    or catastrophic_loss
+                    or time_stop
                 )
             )
-            sell_signal = (
-                multiplied_profit_target
-                or regular_sell_signal
-                or catastrophic_loss
-                or time_stop
-            )
+            slippage_ok = abs(sell_slippage) <= abs(config.config.MAX_SLIPPAGE_SELL)
+            sell_signal = (loss_exceeded or dip_below_profit or advanced_sell_signal) and slippage_ok
+
             if sell_signal:
                 reason = (
-                    "Catastrophic loss"
-                    if catastrophic_loss
+                    "Unrealized loss exceeded"
+                    if loss_exceeded
                     else (
-                        "Time stop"
-                        if time_stop
+                        "Dip below minimum profit"
+                        if dip_below_profit
                         else (
-                            f"Multiplied profit target ({config.config.PROFIT_TARGET_MULTIPLIER}x = {(config.config.PROFIT_TARGET_MULTIPLIER * profit_target)*100:.1f}%)"
-                            if multiplied_profit_target
+                            "Catastrophic loss"
+                            if catastrophic_loss
                             else (
-                                "Trailing stop"
-                                if trailing_loss >= trailing_stop
+                                "Time stop"
+                                if time_stop
                                 else (
-                                    f"Dynamic profit target ({profit_target*100:.1f}%)"
-                                    if unrealized_profit >= profit_target
-                                    else "Negative momentum"
+                                    f"Multiplied profit target ({config.config.PROFIT_TARGET_MULTIPLIER}x = {(config.config.PROFIT_TARGET_MULTIPLIER * profit_target)*100:.1f}%)"
+                                    if multiplied_profit_target
+                                    else (
+                                        "Trailing stop"
+                                        if trailing_loss >= trailing_stop
+                                        else (
+                                            f"Dynamic profit target ({profit_target*100:.1f}%)"
+                                            if unrealized_profit >= profit_target * 100
+                                            else "Negative momentum"
+                                        )
+                                    )
                                 )
                             )
                         )
                     )
+                )
+                logger.info(
+                    f"Evaluation Decision for {symbol}: Selling due to {reason}. "
+                    f"Current: {current_price:.4f}, Highest: {highest_price:.4f}, "
+                    f"Trailing Loss: {trailing_loss:.4f}, ATR Stop: {trailing_stop:.4f}, "
+                    f"Unrealized P/L: {unrealized_profit:.2f}%, Profit Target: {profit_target:.4f}, "
+                    f"EMA_{ema_period}: {ema_dynamic:.2f}, "
+                    f"Holding: {holding_minutes:.2f} min, Neg Momentum Count: {negative_momentum_counts.get(symbol, 0)}, "
+                    f"Sell Slippage: {sell_slippage:.2f}%, Reached Min Profit: {asset['reached_min_profit']}"
                 )
                 finished_trade = sell_asset(
                     symbol,
@@ -348,11 +401,27 @@ class PriceMonitorManager:
                     [],
                     reason,
                     price_monitor_manager=self,
+                    sell_slippage=sell_slippage,
                 )
                 if finished_trade:
                     from .utils import append_to_finished_trades_csv
 
                     append_to_finished_trades_csv(finished_trade)
+            else:
+                if not slippage_ok:
+                    logger.info(
+                        f"Delaying sell for {symbol}: Sell slippage {sell_slippage:.2f}% exceeds threshold {config.config.MAX_SLIPPAGE_SELL:.2f}%"
+                    )
+                # logger.info(
+                #     f"Asset: {symbol}, "
+                #     f"Current: {current_price:.4f}, "
+                #     f"Purchase: {purchase_price:.4f}, "
+                #     f"Quantity: {asset['quantity']:.4f}, "
+                #     f"Unrealized P/L: {unrealized_profit:.2f}%, "
+                #     f"Sell Slippage: {sell_slippage:.2f}%, "
+                #     f"Holding: {holding_minutes:.2f} min, "
+                #     f"Reached Min Profit: {asset['reached_min_profit']}"
+                # )
 
     def start(self, symbol, portfolio, portfolio_lock, candles_df):
         """
