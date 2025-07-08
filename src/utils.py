@@ -155,6 +155,7 @@ def append_to_buy_trades_csv(trade_data):
             "Buy Time",
             "Buy Fee",
             "Buy Slippage",
+            "Sell Slippage",
             "Actual Cost",
             "Allocation",
             "Trade Count",
@@ -292,6 +293,7 @@ def append_to_finished_trades_csv(trade_data):
             "Sell Slippage",
             "Profit/Loss",
             "Reason",
+            "Net Profit/Loss (%)",
         ]
         if not all(field in trade_data for field in required_fields):
             raise ValueError(
