@@ -15,7 +15,7 @@ from .portfolio import sell_asset
 from .state import (ban_expiry_time, is_banned, low_volatility_assets,
                     negative_momentum_counts, weight_used)
 from .utils import calculate_dynamic_ema_period, calculate_ema
-from .bitvavo_order_metrics import calculate_order_book_metrics  # Added for slippage
+from .bitvavo_order_metrics import calculate_order_book_metrics
 
 class PriceMonitorManager:
     def __init__(self):
@@ -35,7 +35,6 @@ class PriceMonitorManager:
             max_threads (int): Maximum number of concurrent threads allowed.
         """
         with threading.Lock():
-            # Use environment-specific concurrency limit
             effective_max_threads = (
                 min(max_threads, config.config.CONCURRENT_REQUESTS)
                 if IS_GITHUB_ACTIONS
@@ -70,7 +69,7 @@ class PriceMonitorManager:
         try:
             logger.info(f"Started price monitoring for {symbol}")
             while self.running.get(symbol, False):
-                if not self.running.get(symbol, False):  # Check before proceeding
+                if not self.running.get(symbol, False):
                     break
                 if is_banned and time.time() < ban_expiry_time:
                     logger.warning(
@@ -105,7 +104,6 @@ class PriceMonitorManager:
                         current_time = datetime.utcnow()
                         current_second = current_time.replace(microsecond=0)
                         self.last_update[symbol] = time.time()
-                        # Minimize lock scope
                         if self.running.get(symbol, False):
                             with portfolio_lock:
                                 if symbol in portfolio["assets"]:
@@ -113,6 +111,41 @@ class PriceMonitorManager:
                                     portfolio["assets"][symbol]["highest_price"] = max(
                                         portfolio["assets"][symbol]["highest_price"],
                                         price,
+                                    )
+                                    # Update peak_profit for the asset
+                                    buy_fee = portfolio["assets"][symbol].get("buy_fee", 0)
+                                    total_cost = (
+                                        portfolio["assets"][symbol]["purchase_price"]
+                                        * portfolio["assets"][symbol]["quantity"]
+                                        + buy_fee
+                                    )
+                                    amount_quote = portfolio["assets"][symbol]["quantity"] * price
+                                    try:
+                                        metrics = calculate_order_book_metrics(
+                                            symbol.replace("/", "-"), amount_quote=amount_quote
+                                        )
+                                        sell_slippage = (
+                                            metrics["slippage_sell"] / 100
+                                            if "error" not in metrics and metrics.get("slippage_sell") is not None
+                                            else float('inf')
+                                        )
+                                    except Exception as e:
+                                        logger.error(
+                                            f"Error calculating sell slippage for {symbol}: {e}",
+                                            exc_info=True,
+                                        )
+                                        sell_slippage = float('inf')
+                                    sale_value = portfolio["assets"][symbol]["quantity"] * price * (1 - abs(sell_slippage))
+                                    sell_fee = sale_value * config.config.SELL_FEE
+                                    net_sale_value = sale_value - sell_fee
+                                    net_profit_loss = (
+                                        (net_sale_value - total_cost) / total_cost * 100
+                                        if total_cost > 0
+                                        else 0
+                                    )
+                                    portfolio["assets"][symbol]["peak_profit"] = max(
+                                        portfolio["assets"][symbol].get("peak_profit", net_profit_loss),
+                                        net_profit_loss
                                     )
                         if (
                             last_candle_time is None
@@ -147,7 +180,6 @@ class PriceMonitorManager:
                             for c in candles
                             if (current_time - c["timestamp"]).total_seconds() <= 5
                         ]
-                        # Check running state before accessing last_update
                         if self.running.get(symbol, False):
                             last_update_time = self.last_update.get(symbol, time.time())
                             if time.time() - last_update_time > config.config.INACTIVITY_TIMEOUT:
@@ -264,14 +296,13 @@ class PriceMonitorManager:
                 negative_momentum_counts[symbol] = 0
             buy_fee = asset.get("buy_fee", 0)
             total_cost = purchase_price * asset["quantity"] + buy_fee
-            # Calculate net profit/loss
             try:
                 amount_quote = asset["quantity"] * current_price
                 metrics = calculate_order_book_metrics(
                     symbol.replace("/", "-"), amount_quote=amount_quote
                 )
                 sell_slippage = (
-                    metrics["slippage_sell"] / 100  # Convert percentage to decimal
+                    metrics["slippage_sell"] / 100
                     if "error" not in metrics and metrics.get("slippage_sell") is not None
                     else float('inf')
                 )
@@ -290,6 +321,11 @@ class PriceMonitorManager:
                 ((current_price * asset["quantity"]) - total_cost) / total_cost * 100
                 if total_cost > 0
                 else 0
+            )
+            # Update peak_profit
+            asset["peak_profit"] = max(
+                asset.get("peak_profit", net_profit_loss),
+                net_profit_loss
             )
             trailing_loss = (
                 (highest_price - current_price) / highest_price
@@ -324,6 +360,12 @@ class PriceMonitorManager:
                 asset["reached_min_profit"] = False
             if net_profit_loss >= config.config.MIN_PROFIT_PERCENT:
                 asset["reached_min_profit"] = True
+            profit_drop = (
+                config.config.USE_SIMPLE_PROFIT_DROP_SELL
+                and asset["reached_min_profit"]
+                and net_profit_loss < asset["peak_profit"]
+                and net_profit_loss >= config.config.MIN_PROFIT_PERCENT
+            )
             loss_exceeded = net_profit_loss <= config.config.MAX_UNREALIZED_LOSS_PERCENT
             dip_below_profit = (
                 asset["reached_min_profit"]
@@ -342,30 +384,37 @@ class PriceMonitorManager:
                 )
             )
             slippage_ok = abs(sell_slippage) <= abs(config.config.MAX_SLIPPAGE_SELL)
-            sell_signal = (loss_exceeded or dip_below_profit or advanced_sell_signal) and slippage_ok
+            sell_signal = (
+                (loss_exceeded or dip_below_profit or advanced_sell_signal or profit_drop)
+                and slippage_ok
+            )
             if sell_signal:
                 reason = (
-                    "Unrealized loss exceeded"
-                    if loss_exceeded
+                    "Profit drop after reaching minimum profit"
+                    if profit_drop
                     else (
-                        "Dip below minimum profit"
-                        if dip_below_profit
+                        "Unrealized loss exceeded"
+                        if loss_exceeded
                         else (
-                            "Catastrophic loss"
-                            if catastrophic_loss
+                            "Dip below minimum profit"
+                            if dip_below_profit
                             else (
-                                "Time stop"
-                                if time_stop
+                                "Catastrophic loss"
+                                if catastrophic_loss
                                 else (
-                                    f"Multiplied profit target ({config.config.PROFIT_TARGET_MULTIPLIER}x = {(config.config.PROFIT_TARGET_MULTIPLIER * profit_target)*100:.1f}%)"
-                                    if multiplied_profit_target
+                                    "Time stop"
+                                    if time_stop
                                     else (
-                                        "Trailing stop"
-                                        if trailing_loss >= trailing_stop
+                                        f"Multiplied profit target ({config.config.PROFIT_TARGET_MULTIPLIER}x = {(config.config.PROFIT_TARGET_MULTIPLIER * profit_target)*100:.1f}%)"
+                                        if multiplied_profit_target
                                         else (
-                                            f"Dynamic profit target ({profit_target*100:.1f}%)"
-                                            if net_profit_loss >= profit_target * 100
-                                            else "Negative momentum"
+                                            "Trailing stop"
+                                            if trailing_loss >= trailing_stop
+                                            else (
+                                                f"Dynamic profit target ({profit_target*100:.1f}%)"
+                                                if net_profit_loss >= profit_target * 100
+                                                else "Negative momentum"
+                                            )
                                         )
                                     )
                                 )
@@ -380,7 +429,8 @@ class PriceMonitorManager:
                     f"Unrealized P/L: {unrealized_profit:.2f}%, Net P/L: {net_profit_loss:.2f}%, "
                     f"Profit Target: {profit_target:.4f}, EMA_{ema_period}: {ema_dynamic:.2f}, "
                     f"Holding: {holding_minutes:.2f} min, Neg Momentum Count: {negative_momentum_counts.get(symbol, 0)}, "
-                    f"Sell Slippage: {sell_slippage*100:.2f}%, Reached Min Profit: {asset['reached_min_profit']}"
+                    f"Sell Slippage: {sell_slippage*100:.2f}%, Reached Min Profit: {asset['reached_min_profit']}, "
+                    f"Peak Profit: {asset['peak_profit']:.2f}%"
                 )
                 finished_trade = sell_asset(
                     symbol,
@@ -410,9 +460,10 @@ class PriceMonitorManager:
                 #     f"Net P/L: {net_profit_loss:.2f}%, "
                 #     f"Sell Slippage: {sell_slippage*100:.2f}%, "
                 #     f"Holding: {holding_minutes:.2f} min, "
-                #     f"Reached Min Profit: {asset['reached_min_profit']}"
+                #     f"Reached Min Profit: {asset['reached_min_profit']}, "
+                #     f"Peak Profit: {asset['peak_profit']:.2f}%"
                 # )
-    
+
     def start(self, symbol, portfolio, portfolio_lock, candles_df):
         """
         Starts a price monitoring thread for a symbol.

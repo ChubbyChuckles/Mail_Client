@@ -120,7 +120,7 @@ def sell_asset(
             return None
         try:
             logger.debug(f"Starting sell process for {symbol}: {reason}")
-            sale_value = asset["quantity"] * current_price * (1 - abs(sell_slippage))  # sell_slippage is already a decimal
+            sale_value = asset["quantity"] * current_price * (1 - abs(sell_slippage))
             sell_fee = sale_value * config.config.SELL_FEE
             net_sale_value = sale_value - sell_fee
             buy_value = asset["quantity"] * asset["purchase_price"]
@@ -137,7 +137,7 @@ def sell_asset(
                 "Sell Price": f"{current_price * (1 - abs(sell_slippage)):.10f}",
                 "Sell Time": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
                 "Sell Fee": f"{sell_fee:.2f}",
-                "Sell Slippage": f"{sell_slippage*100:.2f}%",  # Log as percentage
+                "Sell Slippage": f"{sell_slippage*100:.2f}%",
                 "Profit/Loss": f"{profit_loss:.2f}",
                 "Net Profit/Loss (%)": f"{net_profit_loss:.2f}",
                 "Reason": reason,
@@ -216,7 +216,7 @@ def sell_most_profitable_asset(
                 buy_fee = asset.get("buy_fee", 0)
                 total_cost = asset["purchase_price"] * asset["quantity"] + buy_fee
                 sell_slippage = (
-                    sell_slippages.get(symbol, config.config.MAX_SLIPPAGE_SELL) / 100  # Convert to decimal
+                    sell_slippages.get(symbol, config.config.MAX_SLIPPAGE_SELL) / 100
                     if sell_slippages
                     else config.config.MAX_SLIPPAGE_SELL / 100
                 )
@@ -485,7 +485,7 @@ def manage_portfolio(
     combined_df=None,
 ):
     try:
-        # Input validation (unchanged)
+        # Input validation
         if not isinstance(above_threshold_data, list):
             raise ValueError("above_threshold_data must be a list")
         if not isinstance(percent_changes, pd.DataFrame) or not {
@@ -505,7 +505,7 @@ def manage_portfolio(
         if combined_df is not None and not isinstance(combined_df, pd.DataFrame):
             raise ValueError("combined_df must be a pandas DataFrame")
 
-        # Calculate bullish indicator (unchanged)
+        # Calculate bullish indicator
         bullish_indicator = (
             calculate_bullish_indicator(combined_df, time_window_minutes=10)
             if combined_df is not None
@@ -539,12 +539,12 @@ def manage_portfolio(
                         "error" not in metrics
                         and metrics.get("slippage_sell") is not None
                     ):
-                        sell_slippages[symbol] = metrics["slippage_sell"] / 100 # Convert in Percent
+                        sell_slippages[symbol] = metrics["slippage_sell"] / 100
                     else:
                         logger.warning(
                             f"Could not calculate sell slippage for {symbol}. Using default value."
                         )
-                        sell_slippages[symbol] = float('inf')  # Prevent sell if slippage data is missing
+                        sell_slippages[symbol] = float('inf')
                 except Exception as e:
                     logger.error(
                         f"Error calculating sell slippage for {symbol}: {e}",
@@ -723,7 +723,7 @@ def manage_portfolio(
                 total_cost = purchase_price * asset["quantity"] + buy_fee
                 # Calculate net profit/loss
                 sell_slippage = sell_slippages.get(symbol, config.config.MAX_SLIPPAGE_SELL)
-                sale_value = asset["quantity"] * current_price * (1 - abs(sell_slippage / 100))  # Convert percentage to decimal
+                sale_value = asset["quantity"] * current_price * (1 - abs(sell_slippage / 100))
                 sell_fee = sale_value * config.config.SELL_FEE
                 net_sale_value = sale_value - sell_fee
                 net_profit_loss = (
@@ -735,7 +735,7 @@ def manage_portfolio(
                     ((current_price * asset["quantity"]) - total_cost) / total_cost * 100
                     if total_cost > 0
                     else 0
-                )  # Keep for logging purposes
+                )
                 trailing_loss = (
                     (highest_price - current_price) / highest_price
                     if highest_price > purchase_price
@@ -766,15 +766,26 @@ def manage_portfolio(
                     >= config.config.PROFIT_TARGET_MULTIPLIER * profit_target * 100
                 )
 
-                # Initialize reached_min_profit if not set
+                # Initialize reached_min_profit and peak_profit if not set
                 if "reached_min_profit" not in asset:
                     asset["reached_min_profit"] = False
+                if "peak_profit" not in asset:
+                    asset["peak_profit"] = net_profit_loss
 
-                # Update reached_min_profit
+                # Update reached_min_profit and peak_profit
                 if net_profit_loss >= config.config.MIN_PROFIT_PERCENT:
                     asset["reached_min_profit"] = True
+                asset["peak_profit"] = max(asset["peak_profit"], net_profit_loss)
 
-                # New sell signals
+                # New sell condition: sell if profit drops after reaching minimum profit
+                profit_drop = (
+                    config.config.USE_SIMPLE_PROFIT_DROP_SELL
+                    and asset["reached_min_profit"]
+                    and net_profit_loss < asset["peak_profit"]
+                    and net_profit_loss >= config.config.MIN_PROFIT_PERCENT
+                )
+
+                # Existing sell signals
                 loss_exceeded = net_profit_loss <= config.config.MAX_UNREALIZED_LOSS_PERCENT
                 dip_below_profit = (
                     asset["reached_min_profit"]
@@ -793,31 +804,38 @@ def manage_portfolio(
                     )
                 )
                 slippage_ok = abs(sell_slippages.get(symbol, float('inf'))) <= abs(config.config.MAX_SLIPPAGE_SELL)
-                sell_signal = (loss_exceeded or dip_below_profit or advanced_sell_signal) and slippage_ok
+                sell_signal = (
+                    (loss_exceeded or dip_below_profit or advanced_sell_signal or profit_drop)
+                    and slippage_ok
+                )
 
                 if sell_signal:
                     reason = (
-                        "Unrealized loss exceeded"
-                        if loss_exceeded
+                        "Profit drop after reaching minimum profit"
+                        if profit_drop
                         else (
-                            "Dip below minimum profit"
-                            if dip_below_profit
+                            "Unrealized loss exceeded"
+                            if loss_exceeded
                             else (
-                                "Catastrophic loss"
-                                if catastrophic_loss
+                                "Dip below minimum profit"
+                                if dip_below_profit
                                 else (
-                                    "Time stop"
-                                    if time_stop
+                                    "Catastrophic loss"
+                                    if catastrophic_loss
                                     else (
-                                        f"Multiplied profit target ({config.config.PROFIT_TARGET_MULTIPLIER}x = {(config.config.PROFIT_TARGET_MULTIPLIER * profit_target)*100:.1f}%)"
-                                        if multiplied_profit_target
+                                        "Time stop"
+                                        if time_stop
                                         else (
-                                            "Trailing stop"
-                                            if trailing_loss >= trailing_stop
+                                            f"Multiplied profit target ({config.config.PROFIT_TARGET_MULTIPLIER}x = {(config.config.PROFIT_TARGET_MULTIPLIER * profit_target)*100:.1f}%)"
+                                            if multiplied_profit_target
                                             else (
-                                                f"Dynamic profit target ({profit_target*100:.1f}%)"
-                                                if net_profit_loss >= profit_target * 100
-                                                else "Negative momentum"
+                                                "Trailing stop"
+                                                if trailing_loss >= trailing_stop
+                                                else (
+                                                    f"Dynamic profit target ({profit_target*100:.1f}%)"
+                                                    if net_profit_loss >= profit_target * 100
+                                                    else "Negative momentum"
+                                                )
                                             )
                                         )
                                     )
@@ -861,7 +879,8 @@ def manage_portfolio(
                         f"Net P/L: {net_profit_loss:.2f}%, "
                         f"Sell Slippage: {sell_slippages.get(symbol, 0):.2f}%, "
                         f"Holding: {holding_minutes:.2f} min, "
-                        f"Reached Min Profit: {asset['reached_min_profit']}"
+                        f"Reached Min Profit: {asset['reached_min_profit']}, "
+                        f"Peak Profit: {asset['peak_profit']:.2f}%"
                     )
 
             # Buy new assets
@@ -870,7 +889,7 @@ def manage_portfolio(
                 symbol = record["symbol"]
                 total_score = 0.0
                 slippage_buy = 0.0
-                slippage_sell = float('inf')  # Initialize sell slippage
+                slippage_sell = float('inf')
                 metrics_found = False
                 for metrics in order_book_metrics_list:
                     if metrics.get("market") == symbol.replace("/", "-"):
@@ -992,7 +1011,7 @@ def manage_portfolio(
                     and symbol not in low_volatility_assets
                     and total_score >= config.config.MIN_TOTAL_SCORE
                     and slippage_buy <= config.config.MAX_SLIPPAGE_BUY
-                    and slippage_sell >= config.config.MAX_SLIPPAGE_SELL  # New condition
+                    and slippage_sell >= config.config.MAX_SLIPPAGE_SELL
                     and (
                         not config.config.USE_RSI
                         or (
@@ -1042,7 +1061,7 @@ def manage_portfolio(
                         "Buy Time": current_time.strftime("%Y-%m-%d %H:%M:%S"),
                         "Buy Fee": f"{buy_fee:.2f}",
                         "Buy Slippage": f"{slippage_buy:.2f}%",
-                        "Sell Slippage": f"{slippage_sell:.2f}%",  # Log sell slippage
+                        "Sell Slippage": f"{slippage_sell:.2f}%",
                         "Allocation": f"{allocation:.2f}",
                         "Actual Cost": f"{actual_cost:.2f}",
                         "Trade Count": trade_count,
@@ -1061,6 +1080,7 @@ def manage_portfolio(
                         "profit_target": config.config.PROFIT_TARGET,
                         "original_profit_target": config.config.PROFIT_TARGET,
                         "sell_price": purchase_price * (1 + config.config.PROFIT_TARGET),
+                        "peak_profit": 0.0,  # Initialize peak_profit
                         "reached_min_profit": False,
                     }
                     portfolio["cash"] -= allocation

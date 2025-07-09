@@ -189,6 +189,8 @@ class Config:
         self.MAX_UNREALIZED_LOSS_PERCENT = self.parse_float_env("MAX_UNREALIZED_LOSS_PERCENT", -1.0)  # Max loss before sell (-1%)
         self.MIN_PROFIT_PERCENT = self.parse_float_env("MIN_PROFIT_PERCENT", 2.0)        # Min profit to hold for higher gains (2%)
 
+        self.USE_SIMPLE_PROFIT_DROP_SELL = bool(os.getenv("USE_SIMPLE_PROFIT_DROP_SELL", False))    #  
+
         if self.MAX_ACTIVE_ASSETS < 1:
             logger.warning(
                 f"MAX_ACTIVE_ASSETS is {self.MAX_ACTIVE_ASSETS}, must be >= 1. Setting to 7."
